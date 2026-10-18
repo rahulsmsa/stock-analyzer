@@ -6,7 +6,6 @@ import hashlib
 import json
 import time
 from pathlib import Path
-from typing import Optional
 
 import requests
 
@@ -39,7 +38,7 @@ class Cache:
     def _key(self, url: str) -> str:
         return hashlib.sha256(url.encode()).hexdigest()[:16] + ".json"
 
-    def get(self, url: str) -> Optional[dict]:
+    def get(self, url: str) -> dict | None:
         path = self.cache_dir / self._key(url)
         if not path.exists():
             return None
@@ -56,7 +55,7 @@ class Cache:
 class EdgarClient:
     """Polite SEC EDGAR client with caching and rate limiting."""
 
-    def __init__(self, cache: Optional[Cache] = None):
+    def __init__(self, cache: Cache | None = None):
         self.cache = cache or Cache()
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT})

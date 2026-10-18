@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from stock_analyzer.data.cache import EdgarClient
 
 
@@ -14,7 +12,7 @@ class FilingNotFoundError(Exception):
 class EdgarData:
     """Resolve tickers to CIKs and fetch filing documents."""
 
-    def __init__(self, client: Optional[EdgarClient] = None):
+    def __init__(self, client: EdgarClient | None = None):
         self.client = client or EdgarClient()
 
     def cik_for_ticker(self, ticker: str) -> str:
@@ -33,7 +31,7 @@ class EdgarData:
         url = f"https://data.sec.gov/submissions/CIK{cik}.json"
         return self.client.get_json(url)
 
-    def latest_10k(self, cik: str) -> Optional[dict]:
+    def latest_10k(self, cik: str) -> dict | None:
         """Return the most recent 10-K filing metadata from submissions."""
         subs = self.submissions(cik)
         recent = subs.get("recent", {})

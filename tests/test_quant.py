@@ -1,7 +1,7 @@
 """Tests for the quant engine (Step 4)."""
 
-from stock_analyzer.models import FinancialSeries
 from stock_analyzer.analysis.quant import compute_quant
+from stock_analyzer.models import FinancialSeries
 
 
 def test_compute_quant_basic():

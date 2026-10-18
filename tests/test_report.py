@@ -1,8 +1,12 @@
 """Tests for report schema conformance."""
 
 from stock_analyzer.models import (
-    Report, PriceData, QuantResult, NarrativeAudit,
-    ForensicResult, MoatResult,
+    ForensicResult,
+    MoatResult,
+    NarrativeAudit,
+    PriceData,
+    QuantResult,
+    Report,
 )
 from stock_analyzer.report import render
 

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 
-def _try_openai(prompt: str) -> Optional[str]:
+def _try_openai(prompt: str) -> str | None:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return None

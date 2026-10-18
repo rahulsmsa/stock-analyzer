@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
 class PriceData:
     ticker: str
     price: float
-    shares_outstanding: Optional[float] = None
-    market_cap: Optional[float] = None
-    pe_ratio: Optional[float] = None
-    ev_ebitda: Optional[float] = None
-    fcf_yield: Optional[float] = None
+    shares_outstanding: float | None = None
+    market_cap: float | None = None
+    pe_ratio: float | None = None
+    ev_ebitda: float | None = None
+    fcf_yield: float | None = None
 
 
 @dataclass
@@ -41,9 +40,9 @@ class QuantResult:
     operating_margin: list[float] = field(default_factory=list)
     fcf_conversion: list[float] = field(default_factory=list)
     operating_leverage_score: str = "Negative"
-    roic: Optional[float] = None
-    wacc: Optional[float] = None
-    roic_wacc_spread: Optional[float] = None
+    roic: float | None = None
+    wacc: float | None = None
+    roic_wacc_spread: float | None = None
 
 
 @dataclass

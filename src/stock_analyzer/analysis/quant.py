@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from stock_analyzer.config import (
     DEFAULT_BETA,
     DEFAULT_EQUITY_RISK_PREMIUM,
@@ -13,7 +11,7 @@ from stock_analyzer.config import (
 from stock_analyzer.models import FinancialSeries, QuantResult
 
 
-def _safe_div(a: Optional[float], b: Optional[float]) -> Optional[float]:
+def _safe_div(a: float | None, b: float | None) -> float | None:
     if a is None or b is None or b == 0:
         return None
     return a / b

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 from bs4 import BeautifulSoup
 
@@ -20,7 +19,7 @@ def _clean_text(html: str) -> str:
     return text.strip()
 
 
-def _find_section(text: str, item_patterns: list[str]) -> Optional[str]:
+def _find_section(text: str, item_patterns: list[str]) -> str | None:
     """Find a section by heading patterns, returning text until the next Item heading."""
     for pattern in item_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -33,7 +32,7 @@ def _find_section(text: str, item_patterns: list[str]) -> Optional[str]:
     return None
 
 
-def extract_item_1a(html: str) -> Optional[str]:
+def extract_item_1a(html: str) -> str | None:
     """Extract Item 1A Risk Factors section text."""
     text = _clean_text(html)
     patterns = [
@@ -44,7 +43,7 @@ def extract_item_1a(html: str) -> Optional[str]:
     return _find_section(text, patterns)
 
 
-def extract_item_7(html: str) -> Optional[str]:
+def extract_item_7(html: str) -> str | None:
     """Extract Item 7 MD&A section text."""
     text = _clean_text(html)
     patterns = [

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from stock_analyzer.data.cache import EdgarClient
 from stock_analyzer.models import FinancialSeries
 
@@ -52,7 +50,7 @@ TAGS = {
 }
 
 
-def _find_fact(client: EdgarClient, cik: str, tag: str) -> Optional[list[dict]]:
+def _find_fact(client: EdgarClient, cik: str, tag: str) -> list[dict] | None:
     """Fetch companyconcept facts for a tag, return annual units USD."""
     url = f"https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{tag}.json"
     try:
