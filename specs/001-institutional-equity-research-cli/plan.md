@@ -116,7 +116,9 @@ adds the missing `tests/` tree and completes the module contents against the spe
 ## Status and Next Steps
 
 **Workflow status**: constitution → specify → clarify → plan → tasks → analyze are all
-complete. Phases 1–3 (T001–T023) are implemented and reviewed; Phases 4–8 remain.
+complete. **All phases (1–8) are implemented**: Phases 1–3 (T001–T023) reviewed;
+Phases 4–7 (T024–T044) implemented; Phase 8 (T045–T054) complete including live
+validation (T051), determinism (T052), and cache checks (T053).
 
 | Artifact | State |
 |---|---|
@@ -127,21 +129,29 @@ complete. Phases 1–3 (T001–T023) are implemented and reviewed; Phases 4–8 
 | `data-model.md` | 11 entities |
 | `contracts/` | cli, report-schema, module-interfaces |
 | `quickstart.md` | 9 validation scenarios |
-| `tasks.md` | 56 tasks + 9 remediation tasks (T055–T063); **46 done / 19 open** |
+| `tasks.md` | 56 tasks + 9 remediation tasks (T055–T063); **all 65 done / 0 open** |
 
-### Implementation progress (Phases 1–3)
+### Implementation progress (all phases)
 
 | Gate | Result |
 |---|---|
-| `python -m pytest -q` | **34 passed** (offline) |
+| `python -m pytest -q` | **90 passed** (offline; 15 evals deselected) |
 | `python -m ruff check src tests` | **clean** |
 | Gap register G1–G13 | **all fixed** |
 | Gap register G14–G17 | **all fixed** (T055–T063) |
 | `tests/` tree | restructured into `unit/ property/ contract/ integration/ evals/ fixtures/` |
 | `tests/fixtures/` | real EDGAR payloads for AAPL, MSFT, NVDA (T012 met) |
+| `tests/evals/golden/` | golden contexts + response caching (T045–T048) |
+| `.github/workflows/ci.yml` | ruff + offline pytest on push/PR (T049) |
+| Live validation | AAPL end-to-end vs real EDGAR (T051); deterministic re-runs (T052); cache reuse verified (T053) |
 
 **Known false attestation**: T040 was ticked while `tests/unit/test_llm.py` did not exist.
 The test is now implemented (T063), so the tick is genuine.
+
+**Post-review fix**: `EdgarData.submissions()` normalises the live EDGAR payload
+(`filings.recent` nesting) so downstream consumers see `recent` at the top level;
+fixtures were regenerated to match the real schema after the live run (T051) exposed
+the mismatch.
 
 **Newly discovered defects (G14–G17)**: the XBRL normalization layer was untested and
 produced wrong or empty series. These were **not** caught by the 34 passing tests because

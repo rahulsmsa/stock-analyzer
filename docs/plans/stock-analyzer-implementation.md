@@ -112,20 +112,23 @@ stock-analyzer/
 
 ## Todos
 
-1. **Verify toolchain and initialize project** — confirm Python version, initialize git, create `pyproject.toml`, package skeleton, `.gitignore`, `README.md`, install `requests`, `yfinance`, `beautifulsoup4`, `lxml`, `pytest`, `ruff`.
-2. **Build EDGAR client** — ticker→CIK resolution, submissions index, filing document download, on-disk cache, rate limiting, descriptive User-Agent.
-3. **Build 10-K section parser** — isolate Item 1A Risk Factors and Item 7 MD&A from raw filing HTML with correct boundaries and graceful handling of format variance.
-4. **Build XBRL financial normalizer** — pull companyfacts and produce a clean 3–5 year series of revenue, COGS, SG&A, operating income, capex, OCF, cash, debt, equity.
-5. **Build market data layer** — current price, shares outstanding, market cap, and derivation of P/E, EV/EBITDA, and FCF yield.
-6. **Implement quant engine (Step 4)** — margin trends, FCF conversion, SG&A operating-leverage test, ROIC, WACC, and the ROIC-minus-WACC spread.
-7. **Implement narrative audit (Step 1)** — extract stated goals/KPIs from successive filings, persist them, diff Year-1 promises against Year-2/3 outcomes, and flag dropped or renamed KPIs.
-8. **Implement forensic engine (Step 2)** — purchase obligations and off-balance-sheet commitments, >10% customer/supplier concentration, and accounting-policy/accrual/inventory-method changes.
-9. **Implement moat engine (Step 3)** — score the 4 pillars, assign Wide/Narrow/None, and generate the Bull-vs-Bear debate on the top existential threat.
-10. **Build LLM narrative writer** — provider-agnostic client that receives only computed context and returns prose for Steps 1 and 3, with an offline deterministic fallback.
-11. **Build report generator** — render the exact 6-section Markdown schema from `AGENTS.md`, writing to disk with a sensible filename.
-12. **Build CLI and orchestration** — `stock-analyzer analyze TICKER`, sequencing all 4 steps with progress output and per-step error handling.
-13. **Write test suite** — offline fixture-based tests for section parsing, XBRL normalization, quant math, narrative diffing, forensic extraction, moat rating, and schema conformance.
-14. **Write README and validate end-to-end** — document install/usage/limitations, then run the CLI against a real large-cap ticker and confirm a complete, correctly structured report is produced.
+**Status: all 14 complete.** The authoritative task list with per-task ticks is
+`specs/001-institutional-equity-research-cli/tasks.md` (65/65 done). Summary:
+
+1. ✅ **Verify toolchain and initialize project** — `pyproject.toml`, package skeleton, `.gitignore`, `README.md`, deps installed.
+2. ✅ **Build EDGAR client** — ticker→CIK, submissions index (with `filings.recent` schema normalisation), document download, on-disk cache, rate limiting, descriptive User-Agent.
+3. ✅ **Build 10-K section parser** — Item 1A / Item 7 isolation with boundary heuristics and full-text fallback.
+4. ✅ **Build XBRL financial normalizer** — 3–5 year series with prioritized tag lists and best-covering tag selection.
+5. ✅ **Build market data layer** — price, shares, market cap, P/E, EV/EBITDA, FCF yield.
+6. ✅ **Implement quant engine (Step 4)** — margins, FCF conversion, operating leverage, ROIC vs WACC spread.
+7. ✅ **Implement narrative audit (Step 1)** — goal extraction, theme-level dedup, Year-1 vs Year-3 diff, dropped/renamed KPI flags, `documents_used` provenance.
+8. ✅ **Implement forensic engine (Step 2)** — obligations, concentration (any % threshold), accounting changes, evidence provenance, "none disclosed" vs "not examined".
+9. ✅ **Implement moat engine (Step 3)** — 4 pillars, Wide/Narrow/None, Bull-vs-Bear debate.
+10. ✅ **Build LLM narrative writer** — provider-agnostic, numeric-grounding gate, offline deterministic fallback.
+11. ✅ **Build report generator** — exact 6-section schema, `<TICKER>-<YYYY-MM-DD>.md` filename.
+12. ✅ **Build CLI and orchestration** — `stock-analyzer analyze TICKER`, per-step degradation, exit codes per contract.
+13. ✅ **Write test suite** — 90 offline tests (unit/property/contract/integration) + 15 eval tests (golden contexts, response caching).
+14. ✅ **Write README and validate end-to-end** — README updated; live AAPL run verified (T051), determinism (T052) and cache reuse (T053) confirmed.
 
 ---
 

@@ -1,0 +1,12 @@
+Year1 promises: ['We target revenue growth of 15%']
+Year3 promises: ['We target revenue growth of 15%']
+Dropped KPIs: []
+Shifts: ['Wording evolved for revenue']
+Documents used: []
+---
+Pillar scores: {'switching_costs': 3, 'network_effects': 0, 'cost_advantages': 2, 'intangible_assets': 3}
+Rating: Narrow
+Primary source: switching_costs
+Existential threat: customer concentration
+Recent annual revenues (USD): [130497000000, 130497000000, 215938000000]
+CIK: 0001045810

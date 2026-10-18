@@ -34,9 +34,18 @@ class EdgarData:
         raise FilingNotFoundError(f"Ticker {ticker} not found in SEC company_tickers.json")
 
     def submissions(self, cik: str) -> dict:
-        """Fetch the submissions index for a CIK."""
+        """Fetch the submissions index for a CIK.
+
+        The live EDGAR payload nests the recent-filings arrays under
+        ``filings.recent``; the returned dict is normalised so ``recent`` is
+        always available at the top level for downstream consumers.
+        """
         url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-        return self.client.get_json(url)
+        subs = self.client.get_json(url)
+        if "recent" not in subs and isinstance(subs.get("filings"), dict):
+            subs = dict(subs)
+            subs["recent"] = subs["filings"].get("recent", {})
+        return subs
 
     def filings(self, cik: str, forms: list[str] | None = None) -> list[Filing]:
         """Return filings ordered by period descending, as typed Filing entities.
