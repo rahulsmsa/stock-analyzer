@@ -88,5 +88,12 @@ Always output your findings in the following standardized Markdown report format
 - Python package code lives under `src/stock_analyzer/`.
 - Tests live under `tests/` and must run offline against saved fixtures.
 
+### Implementation handoff
+- The authoritative work list is `specs/001-institutional-equity-research-cli/tasks.md`. Implement tasks in ID order; do not invent work outside it.
+- Before writing code, read `plan.md`'s **Gap register (G1–G13)**. The existing `src/stock_analyzer/` skeleton predates the plan and contains those defects. A task that fixes a gap names it in its description.
+- The contracts in `specs/001-institutional-equity-research-cli/contracts/` are binding: `report-schema.md` fixes the six-section output, `module-interfaces.md` fixes each module's signature and dependency direction, `cli.md` fixes the command surface and exit codes.
+- Mark a task `[x]` in `tasks.md` in the same commit that completes it, so progress is visible to every agent.
+- Definition of done for any task: `python -m pytest -q` passes offline and `python -m ruff check src tests` is clean.
+
 ### Keeping this file current
 - `AGENTS.md` is the single source of truth for agent behavior and repository conventions. Update it when conventions change.
