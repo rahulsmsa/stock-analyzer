@@ -116,26 +116,41 @@ adds the missing `tests/` tree and completes the module contents against the spe
 ## Status and Next Steps
 
 **Workflow status**: constitution → specify → clarify → plan → tasks → analyze are all
-complete. The artifacts are ready to implement.
+complete. Phases 1–3 (T001–T023) are implemented and reviewed; Phases 4–8 remain.
 
 | Artifact | State |
 |---|---|
 | `.specify/memory/constitution.md` | v1.0.0, ratified |
 | `spec.md` | 5 user stories, FR-001–FR-029, SC-001–SC-011 |
-| `plan.md` | complete, with gap register G1–G13 |
+| `plan.md` | complete, with gap register G1–G17 |
 | `research.md` | 7 decisions resolved |
 | `data-model.md` | 11 entities |
 | `contracts/` | cli, report-schema, module-interfaces |
 | `quickstart.md` | 9 validation scenarios |
-| `tasks.md` | 56 tasks, 8 phases, 100% requirement coverage |
+| `tasks.md` | 56 tasks + 9 remediation tasks (T055–T063); **46 done / 19 open** |
 
-**Next step**: implement `tasks.md` in order, starting with Phase 1 (T001–T004) and Phase 2
-(T005–T013). Phase 2 blocks every user story. The MVP is Phases 1–3 (T001–T023), which yields a
-working CLI that writes a six-section report.
+### Implementation progress (Phases 1–3)
 
-**Before writing code**, read the gap register above: the existing `src/stock_analyzer/`
-skeleton predates this plan and contains 13 defects, each mapped to a task. Implementing the
-tasks without addressing them will reproduce the defects.
+| Gate | Result |
+|---|---|
+| `python -m pytest -q` | **34 passed** (offline) |
+| `python -m ruff check src tests` | **clean** |
+| Gap register G1–G13 | **all fixed** |
+| Gap register G14–G17 | **all fixed** (T055–T063) |
+| `tests/` tree | restructured into `unit/ property/ contract/ integration/ evals/ fixtures/` |
+| `tests/fixtures/` | real EDGAR payloads for AAPL, MSFT, NVDA (T012 met) |
+
+**Known false attestation**: T040 was ticked while `tests/unit/test_llm.py` did not exist.
+The test is now implemented (T063), so the tick is genuine.
+
+**Newly discovered defects (G14–G17)**: the XBRL normalization layer was untested and
+produced wrong or empty series. These were **not** caught by the 34 passing tests because
+there was no `tests/unit/test_xbrl.py`, and `tests/integration/test_end_to_end.py` asserted
+only that headings exist — never that any numeric value was non-`n/a`. A report that was
+100% `n/a` passed the suite. All four are now fixed and covered by tests.
+
+**Next step**: implement Phases 4–8 (T024–T054) — US2 narrative, US3 forensic, evals, and
+CI/README/quickstart/determinism/cache/docs.
 
 **Verification gates** for the implementation: `python -m pytest -q` must pass offline,
 `python -m ruff check src tests` must be clean, and the [quickstart.md](./quickstart.md)
@@ -216,6 +231,18 @@ here so they are not lost:
 | G11 | `analysis/forensic.py` | No `evidence` mapping; no distinction between "none disclosed" and "not examined" | FR-022, data-model §9 |
 | G12 | `data/market.py` | No `as_of` or `beta`; `0.0` used where `None` is required | data-model §6 |
 | G13 | repository | No `tests/` tree at all | FR-019, SC-003, constitution III |
+| G14 | `data/xbrl.py` | `TAGS["cogs"]` omits `GrossProfit`; AAPL uses none of the listed tags, so `cogs` is empty and gross margin is `n/a` for every year | FR-016, data-model §5 |
+| G15 | `data/xbrl.py` | `TAGS["capex"]` lists `CapitalExpenditures` / `PurchaseOfPropertyPlantAndEquipment`; the real tag is `PaymentsToAcquirePropertyPlantAndEquipment`, so `capex` is empty for AAPL, MSFT and NVDA and FCF conversion is `n/a` everywhere | FR-016, data-model §5 |
+| G16 | `data/xbrl.py` | `_pick_latest_per_year` selects the latest `end` date per calendar year with no period-duration check, so 90-day quarterly facts are mixed with annual ones. AAPL 2017–2019 revenue resolves to 88.3B/84.3B/91.8B instead of ~229B/265B/260B, yielding operating margins of 69.5%/84.1%/69.6% instead of ~30%. Affects AAPL (3 yrs), MSFT (4 yrs) and NVDA (3 yrs) | FR-016, SC-004, constitution I |
+| G17 | `data/xbrl.py` | `TAGS["sga"]` and `TAGS["depreciation_amortisation"]` omit the tags MSFT actually files, so both series are empty for MSFT | FR-016, data-model §5 |
+
+**Status of G14–G17**: **fixed** (T055–T063). The normalizer now reads `companyfacts`
+(matching the committed fixtures, so tests are genuinely offline), filters to annual
+duration facts, derives `cogs` from `GrossProfit` when needed, uses the real capex tag, and
+selects the best-covering tag per metric. AAPL and MSFT now resolve every metric with zero
+gaps; NVDA's remaining gaps are genuine fixture limitations. `tests/unit/test_xbrl.py` and
+`tests/unit/test_llm.py` were added, and the integration test now asserts real numbers and
+fails on network I/O.
 
 ## Post-Design Constitution Re-check
 

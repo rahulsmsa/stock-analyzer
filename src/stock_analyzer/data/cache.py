@@ -28,8 +28,21 @@ class RateLimiter:
         self._last_call = time.time()
 
 
+class CacheEntry:
+    """A cached value with an optional expiry timestamp."""
+
+    def __init__(self, data: dict, expiry: float | None = None):
+        self.data = data
+        self.expiry = expiry  # None means never expires
+
+    def is_expired(self) -> bool:
+        if self.expiry is None:
+            return False
+        return time.time() > self.expiry
+
+
 class Cache:
-    """On-disk JSON cache keyed by URL hash."""
+    """On-disk JSON cache keyed by URL hash with per-entry expiry."""
 
     def __init__(self, cache_dir: Path = CACHE_DIR):
         self.cache_dir = cache_dir
@@ -43,13 +56,25 @@ class Cache:
         if not path.exists():
             return None
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            payload = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
+        entry = CacheEntry(payload.get("data"), payload.get("expiry"))
+        if entry.is_expired():
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            return None
+        return entry.data
 
-    def set(self, url: str, data: dict) -> None:
+    def set(self, url: str, data: dict, ttl: int | None = None) -> None:
         path = self.cache_dir / self._key(url)
-        path.write_text(json.dumps(data), encoding="utf-8")
+        expiry = None
+        if ttl is not None:
+            expiry = time.time() + ttl
+        payload = {"data": data, "expiry": expiry}
+        path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 class EdgarClient:
@@ -61,7 +86,7 @@ class EdgarClient:
         self.session.headers.update({"User-Agent": USER_AGENT})
         self.limiter = RateLimiter(EDGAR_REQUESTS_PER_SECOND)
 
-    def get_json(self, url: str) -> dict:
+    def get_json(self, url: str, ttl: int | None = None) -> dict:
         self.limiter.wait()
         cached = self.cache.get(url)
         if cached is not None:
@@ -69,10 +94,10 @@ class EdgarClient:
         resp = self.session.get(url, timeout=30)
         resp.raise_for_status()
         data = resp.json()
-        self.cache.set(url, data)
+        self.cache.set(url, data, ttl=ttl)
         return data
 
-    def get_text(self, url: str) -> str:
+    def get_text(self, url: str, ttl: int | None = None) -> str:
         self.limiter.wait()
         cached = self.cache.get(url)
         if cached is not None and isinstance(cached, dict) and "_text" in cached:
@@ -80,5 +105,5 @@ class EdgarClient:
         resp = self.session.get(url, timeout=30)
         resp.raise_for_status()
         text = resp.text
-        self.cache.set(url, {"_text": text})
+        self.cache.set(url, {"_text": text}, ttl=ttl)
         return text

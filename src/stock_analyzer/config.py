@@ -20,7 +20,22 @@ EDGAR_ARCHIVES_URL = "https://www.sec.gov/Archives/edgar/data"
 
 YFINANCE_REQUESTS_PER_SECOND = float(os.environ.get("YFINANCE_RPS", "2"))
 
+# Cache TTLs in seconds. Filed documents are immutable and cached indefinitely;
+# market data carries a short expiry (FR-025, research §7).
+CACHE_TTL_FILINGS = None  # None means no expiry
+CACHE_TTL_MARKET = int(os.environ.get("STOCK_ANALYZER_MARKET_TTL", "3600"))
+CACHE_TTL_TICKER_MAP = int(os.environ.get("STOCK_ANALYZER_TICKER_MAP_TTL", "86400"))
+
+# Section extraction floor: a real Item 1A is never a few hundred characters.
+SECTION_CHAR_FLOOR = int(os.environ.get("STOCK_ANALYZER_SECTION_FLOOR", "500"))
+
+# Default years of history: target five, minimum three.
+DEFAULT_YEARS = 5
+MIN_YEARS = 3
+MAX_YEARS = 5
+
+# WACC defaults (configurable, overridable; disclosed in the report per FR-016).
 DEFAULT_RISK_FREE_RATE = 0.04
 DEFAULT_EQUITY_RISK_PREMIUM = 0.05
-DEFAULT_BETA = 1.0
 DEFAULT_TAX_RATE = 0.21
+DEFAULT_BETA = 1.0

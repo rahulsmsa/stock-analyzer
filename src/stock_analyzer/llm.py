@@ -3,6 +3,30 @@
 from __future__ import annotations
 
 import os
+import re
+
+import requests
+
+NOT_SYNTHESISED = "[not synthesised]"
+
+# Numbers in prose must already appear in the computed context (FR-024). Matches
+# integers and decimals, with optional thousands separators.
+_NUMBER_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+
+def _numbers_in(text: str) -> set[str]:
+    """Return the set of numeric literals in ``text``, normalised (commas stripped)."""
+    return {m.group(0).replace(",", "") for m in _NUMBER_RE.finditer(text)}
+
+
+def _is_grounded(prose: str, context: str) -> bool:
+    """True when every number in ``prose`` also appears in ``context`` (FR-024).
+
+    A model that invents a figure not present in the computed context is rejected, so
+    hallucinated numbers never reach the report.
+    """
+    allowed = _numbers_in(context)
+    return _numbers_in(prose) <= allowed
 
 
 def _try_openai(prompt: str) -> str | None:
@@ -20,7 +44,7 @@ def _try_openai(prompt: str) -> str | None:
             max_tokens=600,
         )
         return resp.choices[0].message.content
-    except Exception:
+    except (requests.RequestException, ValueError):
         return None
 
 
@@ -33,17 +57,16 @@ def write_narrative_prose(context: str) -> str:
         f"{context}"
     )
     prose = _try_openai(prompt)
-    if prose:
+    if prose and _is_grounded(prose, context):
         return prose
-    return (
-        "[LLM not configured — deterministic fallback]\n"
-        f"{context}\n"
-        "Narrative synthesis skipped; see structured findings above."
-    )
+    return NOT_SYNTHESISED
 
 
-def write_bull_bear_debate(context: str) -> str:
-    """Write Step 3 Bull-vs-Bear debate. Falls back to deterministic summary."""
+def write_bull_bear_debate(context: str) -> tuple[str, str]:
+    """Write Step 3 Bull-vs-Bear debate. Falls back to deterministic summary.
+
+    Returns a (bull_case, bear_case) pair so cli.py can assign each to its own field.
+    """
     prompt = (
         "You are an equity research analyst. Based on the following computed moat context, "
         "write a Bull-vs-Bear debate highlighting the single most existential threat "
@@ -51,10 +74,14 @@ def write_bull_bear_debate(context: str) -> str:
         f"{context}"
     )
     prose = _try_openai(prompt)
-    if prose:
-        return prose
-    return (
-        "[LLM not configured — deterministic fallback]\n"
-        f"{context}\n"
-        "Debate synthesis skipped; see structured moat findings above."
-    )
+    if prose and _is_grounded(prose, context):
+        # Best-effort split: look for a Bear marker; otherwise treat whole as bull.
+        if "Bear" in prose or "BEAR" in prose:
+            parts = re.split(r"(?i)\bBear\b", prose, maxsplit=1)
+            bull = parts[0].strip()
+            bear = ("Bear " + parts[1]).strip() if len(parts) > 1 else prose
+        else:
+            bull = prose.strip()
+            bear = prose.strip()
+        return bull, bear
+    return NOT_SYNTHESISED, NOT_SYNTHESISED

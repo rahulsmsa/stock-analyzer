@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from stock_analyzer.config import (
-    DEFAULT_BETA,
     DEFAULT_EQUITY_RISK_PREMIUM,
     DEFAULT_RISK_FREE_RATE,
     DEFAULT_TAX_RATE,
@@ -17,36 +16,42 @@ def _safe_div(a: float | None, b: float | None) -> float | None:
     return a / b
 
 
-def compute_quant(series: FinancialSeries) -> QuantResult:
+def _not_meaningful_when_negative(value: float | None, denominator: float | None) -> float | None:
+    """A ratio whose denominator is negative is not meaningful (sign inverts meaning)."""
+    if value is None or denominator is None or denominator < 0:
+        return None
+    return value
+
+
+def compute_quant(series: FinancialSeries, beta: float | None = None) -> QuantResult:
     result = QuantResult()
 
     # Gross margin = (revenue - cogs) / revenue
     for rev, cogs in zip(series.revenue, series.cogs):
-        if rev and rev != 0:
-            result.gross_margin.append((rev - cogs) / rev)
-        else:
-            result.gross_margin.append(0.0)
+        gm = _safe_div((rev - cogs) if rev is not None and cogs is not None else None, rev)
+        result.gross_margin.append(gm if gm is not None else None)
 
     # Operating margin = operating_income / revenue
     for rev, oi in zip(series.revenue, series.operating_income):
-        if rev and rev != 0:
-            result.operating_margin.append(oi / rev)
-        else:
-            result.operating_margin.append(0.0)
+        result.operating_margin.append(_safe_div(oi, rev))
 
-    # FCF conversion = (OCF - capex) / operating_income
-    for ocf, capex, oi in zip(series.operating_cash_flow, series.capex, series.operating_income):
-        fcf = ocf - capex
-        if oi and oi != 0:
-            result.fcf_conversion.append(fcf / oi)
-        else:
-            result.fcf_conversion.append(0.0)
+    # FCF conversion = (operating_cash_flow - capex) / operating_cash_flow
+    for ocf, capex in zip(series.operating_cash_flow, series.capex):
+        fcf = (ocf - capex) if ocf is not None and capex is not None else None
+        result.fcf_conversion.append(_not_meaningful_when_negative(_safe_div(fcf, ocf), ocf))
 
     # Operating leverage test: is revenue growth outstripping SG&A growth?
     if len(series.revenue) >= 2 and len(series.sga) >= 2:
-        rev_growth = (series.revenue[-1] - series.revenue[0]) / series.revenue[0] if series.revenue[0] else 0
-        sga_growth = (series.sga[-1] - series.sga[0]) / series.sga[0] if series.sga[0] else 0
-        result.operating_leverage_score = "Positive" if rev_growth > sga_growth else "Negative"
+        rev_growth = _safe_div(
+            series.revenue[-1] - series.revenue[0], series.revenue[0]
+        )
+        sga_growth = _safe_div(
+            series.sga[-1] - series.sga[0], series.sga[0]
+        )
+        if rev_growth is not None and sga_growth is not None:
+            result.operating_leverage_score = (
+                "Positive" if rev_growth > sga_growth else "Negative"
+            )
 
     # ROIC = NOPAT / Invested Capital
     # NOPAT = operating_income * (1 - tax_rate)
@@ -56,6 +61,20 @@ def compute_quant(series: FinancialSeries) -> QuantResult:
     latest_equity = series.equity[-1] if series.equity else None
     latest_cash = series.cash[-1] if series.cash else None
 
+    # WACC inputs (every assumption disclosed, FR-016, SC-009)
+    result.wacc_inputs = {
+        "risk_free_rate": DEFAULT_RISK_FREE_RATE,
+        "equity_risk_premium": DEFAULT_EQUITY_RISK_PREMIUM,
+        "tax_rate": DEFAULT_TAX_RATE,
+        "beta": beta if beta is not None else 1.0,
+    }
+    result.wacc_input_sources = {
+        "risk_free_rate": "default",
+        "equity_risk_premium": "default",
+        "tax_rate": "default",
+        "beta": "derived" if beta is not None else "default",
+    }
+
     if latest_oi is not None and latest_debt is not None and latest_equity is not None:
         nopat = latest_oi * (1 - DEFAULT_TAX_RATE)
         invested_capital = (latest_debt or 0) + (latest_equity or 0) - (latest_cash or 0)
@@ -64,7 +83,8 @@ def compute_quant(series: FinancialSeries) -> QuantResult:
 
     # WACC = (E/V * Re) + (D/V * Rd * (1 - tax))
     # Re = rf + beta * ERP ; assume Rd = rf (simplification)
-    cost_of_equity = DEFAULT_RISK_FREE_RATE + DEFAULT_BETA * DEFAULT_EQUITY_RISK_PREMIUM
+    beta_used = result.wacc_inputs["beta"]
+    cost_of_equity = DEFAULT_RISK_FREE_RATE + beta_used * DEFAULT_EQUITY_RISK_PREMIUM
     cost_of_debt = DEFAULT_RISK_FREE_RATE
     if latest_debt is not None and latest_equity is not None:
         e = latest_equity

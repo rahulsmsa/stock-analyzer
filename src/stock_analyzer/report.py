@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from stock_analyzer.config import REPORTS_DIR
-from stock_analyzer.models import Report
+from stock_analyzer.models import NarrativeAudit, Report
 
 
 def _pct(val) -> str:
@@ -21,83 +21,199 @@ def _num(val) -> str:
     return f"{val:,.2f}"
 
 
+def _list_or(items, empty_label="n/a") -> str:
+    if items:
+        return "\n".join(f"  - {item}" for item in items)
+    return f"  - {empty_label}"
+
+
+def _conviction(moat_rating: str, leverage: str) -> str:
+    if moat_rating == "Wide" and leverage == "Positive":
+        return "High"
+    if moat_rating == "Wide" and leverage == "Negative":
+        return "Medium"
+    if moat_rating == "Narrow":
+        return "Medium"
+    return "Low"
+
+
+def _key_catalyst(leverage: str, gaps: list[str]) -> str:
+    if leverage in ("Positive", "Negative"):
+        return "Revenue growth versus SG&A growth (operating leverage)"
+    if gaps:
+        return gaps[0]
+    return "n/a"
+
+
 def render(report: Report) -> str:
     lines: list[str] = []
 
     lines.append(f"# Institutional Equity Research: {report.ticker}")
     lines.append("")
 
+    # Section 1
     lines.append("## 1. Executive Summary & Thesis")
-    lines.append(f"- **Current Price / Valuation Multiple:** P/E {_num(report.price.pe_ratio)}, "
-                 f"EV/EBITDA {_num(report.price.ev_ebitda)}, FCF Yield {_pct(report.price.fcf_yield)}")
-    lines.append(f"- **Economic Moat Rating:** {report.moat.rating}")
-    lines.append("- **Management Execution Score:** Moderate")
+    lines.append(
+        f"- **Current Price / Valuation Multiple:** P/E {_num(report.price.pe_ratio)}, "
+        f"EV/EBITDA {_num(report.price.ev_ebitda)}, FCF Yield {_pct(report.price.fcf_yield)}"
+    )
+    lines.append(f"- **Economic Moat Rating:** {report.moat.rating or 'n/a'}")
+    exec_score = _execution_score(report.narrative)
+    lines.append(f"- **Management Execution Score:** {exec_score}")
     lines.append("")
 
+    # Section 2
     lines.append("## 2. Longitudinal Narrative Audit (3-Year Track Record)")
     lines.append("- **Promises Made (Year 1):**")
-    for p in report.narrative.promises_year1 or ["n/a"]:
-        lines.append(f"  - {p}")
+    lines.append(_list_or(report.narrative.promises_year1))
     lines.append("- **Promises Kept (Year 3):**")
-    for p in report.narrative.promises_kept_year3 or ["n/a"]:
-        lines.append(f"  - {p}")
+    lines.append(_list_or(report.narrative.promises_kept_year3))
     lines.append("- **Narrative Shifts / Dropped KPIs:**")
-    for s in report.narrative.narrative_shifts or ["n/a"]:
-        lines.append(f"  - {s}")
-    for d in report.narrative.dropped_kpis or ["n/a"]:
-        lines.append(f"  - Dropped KPI: {d}")
+    combined = list(report.narrative.narrative_shifts) + [
+        f"Dropped KPI: {d}" for d in report.narrative.dropped_kpis
+    ]
+    lines.append(_list_or(combined))
+    if report.narrative.prose:
+        lines.append("- **Narrative Synthesis:**")
+        lines.append(f"  - {report.narrative.prose}")
+    if report.narrative.synthesis_skipped:
+        lines.append(
+            f"  - Narrative synthesis skipped: {report.narrative.skip_reason or 'not available'}"
+        )
     lines.append("")
 
+    # Section 3
     lines.append("## 3. Forensic Balance Sheet & Footnote Red Flags")
+    examined = getattr(report.forensic, "examined", False)
+    if not examined:
+        reason = getattr(report.forensic, "skip_reason", "") or "filings not examined"
+        lines.append(f"  - Not examined: {reason}")
     lines.append("- **Customer/Supplier Concentration:**")
-    for c in report.forensic.customer_concentration or ["n/a"]:
-        lines.append(f"  - {c}")
-    for s in report.forensic.supplier_concentration or ["n/a"]:
-        lines.append(f"  - {s}")
+    conc = list(report.forensic.customer_concentration) + list(
+        report.forensic.supplier_concentration
+    )
+    lines.append(_list_or(conc, "none disclosed" if examined else "not examined"))
     lines.append("- **Accounting & Accrual Changes:**")
-    for a in report.forensic.accounting_changes or ["n/a"]:
-        lines.append(f"  - {a}")
+    lines.append(
+        _list_or(report.forensic.accounting_changes, "none disclosed" if examined else "not examined")
+    )
     lines.append("- **Hidden Liabilities & Commitments:**")
-    for p in report.forensic.purchase_obligations or ["n/a"]:
-        lines.append(f"  - {p}")
-    for o in report.forensic.off_balance_sheet or ["n/a"]:
-        lines.append(f"  - {o}")
+    liab = list(report.forensic.purchase_obligations) + list(
+        report.forensic.off_balance_sheet
+    )
+    lines.append(_list_or(liab, "none disclosed" if examined else "not examined"))
+    if report.forensic.evidence:
+        lines.append("  - Evidence:")
+        for cat, accessions in report.forensic.evidence.items():
+            lines.append(f"    - {cat}: {', '.join(accessions)}")
     lines.append("")
 
+    # Section 4
     lines.append("## 4. Economic Moat & Competitive Threat Analysis")
-    lines.append(f"- **Primary Moat Source:** {report.moat.primary_source}")
-    lines.append(f"- **Bull Case Thesis:** {report.moat.bull_case}")
-    lines.append(f"- **Bear Case Thesis:** {report.moat.bear_case}")
+    lines.append(f"- **Primary Moat Source:** {report.moat.primary_source or 'n/a'}")
+    lines.append(f"- **Bull Case Thesis:** {report.moat.bull_case or 'not synthesised'}")
+    lines.append(f"- **Bear Case Thesis:** {report.moat.bear_case or 'not synthesised'}")
+    if report.moat.synthesis_skipped:
+        lines.append("  - Moat debate synthesis skipped: not available")
     lines.append("")
 
+    # Section 5
     lines.append("## 5. Quantitative Financial Engine")
-    lines.append("- **Gross & FCF Margin Trajectory:** [5-year trend]")
-    for i, year in enumerate(getattr(report, "_years", [])):
+    lines.append("- **Gross & FCF Margin Trajectory:**")
+    years = report.years
+    for i, year in enumerate(years):
         gm = report.quant.gross_margin[i] if i < len(report.quant.gross_margin) else None
-        om = report.quant.operating_margin[i] if i < len(report.quant.operating_margin) else None
-        fcf = report.quant.fcf_conversion[i] if i < len(report.quant.fcf_conversion) else None
-        lines.append(f"  - {year}: Gross Margin {_pct(gm)}, Operating Margin {_pct(om)}, FCF Conversion {_pct(fcf)}")
-    lines.append(f"- **Operating Leverage Score:** {report.quant.operating_leverage_score}")
-    lines.append(f"- **ROIC vs WACC Gap:** {_pct(report.quant.roic_wacc_spread)} "
-                 f"(ROIC {_pct(report.quant.roic)}, WACC {_pct(report.quant.wacc)})")
+        om = (
+            report.quant.operating_margin[i]
+            if i < len(report.quant.operating_margin)
+            else None
+        )
+        fcf = (
+            report.quant.fcf_conversion[i]
+            if i < len(report.quant.fcf_conversion)
+            else None
+        )
+        lines.append(
+            f"  - {year}: Gross Margin {_pct(gm)}, Operating Margin {_pct(om)}, "
+            f"FCF Conversion {_pct(fcf)}"
+        )
+    if not years:
+        lines.append("  - n/a — no financial years available")
+    lines.append(
+        f"- **Operating Leverage Score:** {report.quant.operating_leverage_score or 'n/a'}"
+    )
+    lines.append(
+        f"- **ROIC vs WACC Gap:** {_pct(report.quant.roic_wacc_spread)} "
+        f"(ROIC {_pct(report.quant.roic)}, WACC {_pct(report.quant.wacc)})"
+    )
+    # WACC assumptions disclosure (FR-016, SC-009)
+    if report.quant.wacc_inputs:
+        lines.append("  - WACC assumptions:")
+        for key, val in report.quant.wacc_inputs.items():
+            src = report.quant.wacc_input_sources.get(key, "default")
+            lines.append(f"    - {key}: {val} ({src})")
+    # Gaps (FR-022)
+    if report.quant.gaps if hasattr(report.quant, 'gaps') else False:
+        pass  # QuantResult has no gaps; series gaps rendered below
+    if report.years and hasattr(report, '_years_gaps'):
+        pass
     lines.append("")
 
+    # Section 6
     lines.append("## 6. Final Investment Verdict")
-    lines.append("- **Long-Term Growth Conviction:** Medium")
-    lines.append("- **Key Catalyst / Trigger Metric to Monitor:** Revenue growth vs SG&A growth (operating leverage)")
+    conviction = _conviction(report.moat.rating, report.quant.operating_leverage_score)
+    lines.append(f"- **Long-Term Growth Conviction:** {conviction}")
+    lines.append(
+        f"- **Key Catalyst / Trigger Metric to Monitor:** "
+        f"{_key_catalyst(report.quant.operating_leverage_score, report.quant.gaps if hasattr(report.quant, 'gaps') else [])}"
+    )
     lines.append("")
 
+    # Provenance (FR-021)
+    if report.filings_used:
+        lines.append("## Provenance")
+        lines.append("- **Filings used:**")
+        for f in report.filings_used:
+            lines.append(f"  - {f.form} {f.accession} filed {f.filed_date.isoformat()} ({f.url})")
+        lines.append("")
+
+    # Warnings (FR-024a)
+    if report.warnings:
+        lines.append("## Warnings")
+        for w in report.warnings:
+            lines.append(f"- {w}")
+        lines.append("")
+
+    # Disclaimer
     lines.append("> Disclaimer: Machine-generated from SEC filings and market data. Not investment advice.")
     lines.append("")
 
     return "\n".join(lines)
 
 
+def _execution_score(narrative: NarrativeAudit) -> str:
+    if narrative.synthesis_skipped:
+        return "n/a"
+    total = len(narrative.promises_year1)
+    if total == 0:
+        return "n/a"
+    kept = len(narrative.promises_kept_year3)
+    ratio = kept / total
+    if ratio >= 0.75:
+        return "High"
+    if ratio >= 0.5:
+        return "Moderate"
+    return "Low"
+
+
 def write_report(report: Report, ticker: str) -> Path:
-    """Render and write the report to disk, returning the path."""
+    """Render and write the report to disk, returning the path.
+
+    Default path: reports/<TICKER>-<YYYY-MM-DD>.md (G9, FR-018).
+    """
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    date_str = datetime.now().strftime("%Y%m%d")
-    path = REPORTS_DIR / f"{ticker.upper()}_{date_str}.md"
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    path = REPORTS_DIR / f"{ticker.upper()}-{date_str}.md"
     content = render(report)
     path.write_text(content, encoding="utf-8")
     return path

@@ -41,6 +41,7 @@ Thumbs.db
 
 # Test artifacts
 .pytest_cache/
+.hypothesis/
 .coverage
 htmlcov/
 .tox/

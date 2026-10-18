@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from stock_analyzer.models import MoatResult
 
 PILLARS = [
@@ -12,23 +14,30 @@ PILLARS = [
 ]
 
 
-def score_moat(
-    switching_costs: int = 2,
-    network_effects: int = 2,
-    cost_advantages: int = 2,
-    intangible_assets: int = 2,
-) -> MoatResult:
-    """Score each pillar 0–5 and assign Wide/Narrow/None.
+@dataclass
+class MoatEvidence:
+    """Evidence inputs for the four Morningstar pillars, each scored 0..5."""
 
-    Scores are heuristic inputs; in a fuller build they'd be derived from
-    forensic/quant data. Defaults to neutral 2 for each pillar.
+    switching_costs: int
+    network_effects: int
+    cost_advantages: int
+    intangible_assets: int
+
+
+def score_moat(evidence: MoatEvidence) -> MoatResult:
+    """Score each pillar 0–5 and assign Wide/Narrow/None by a fixed rule.
+
+    Rating thresholds (SC-008):
+      >= 14  -> Wide
+      7..13  -> Narrow
+      < 7    -> None
     """
     result = MoatResult()
     result.pillar_scores = {
-        "Switching Costs": switching_costs,
-        "Network Effects": network_effects,
-        "Cost Advantages": cost_advantages,
-        "Intangible Assets": intangible_assets,
+        "Switching Costs": evidence.switching_costs,
+        "Network Effects": evidence.network_effects,
+        "Cost Advantages": evidence.cost_advantages,
+        "Intangible Assets": evidence.intangible_assets,
     }
 
     total = sum(result.pillar_scores.values())
