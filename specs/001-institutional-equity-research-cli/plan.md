@@ -141,6 +141,36 @@ tasks without addressing them will reproduce the defects.
 `python -m ruff check src tests` must be clean, and the [quickstart.md](./quickstart.md)
 scenarios must pass, including the live end-to-end run in scenario 4.
 
+
+## Enhancements and Operational Scope Additions
+
+Following a comprehensive audit of `plan.md` against `spec.md`, `AGENTS.md`, and the SpecKit contract specifications, the following operational and technical items are formally recognized and integrated into the plan:
+
+1. **Earnings Transcripts vs. SEC Filings Bridge**:
+   - *Audit finding*: `AGENTS.md` Step 1 references 8–12 quarters of earnings call transcripts or annual reports. `research.md` notes that a paid transcript API is out-of-scope for the baseline CLI and relies on 10-K/10-Q/8-K text.
+   - *Plan update*: Step 1 narrative auditor explicitly records provenance (`documents_used`), supports both filed submissions (10-K/10-Q/8-K) and an extensible local transcript ingestion hook (JSON/TXT under `.cache/transcripts/` or `--transcripts-dir`), ensuring strict compliance with `AGENTS.md` without requiring a paid subscription.
+
+2. **Cross-Platform Pathing and Windows Compatibility**:
+   - *Audit finding*: CLI and report generation contract specifies path output on stdout and cache storage under `.cache/` and `reports/`.
+   - *Plan update*: Enforce `pathlib.Path` cross-platform normalization everywhere to prevent backslash/forward-slash truncation or regex escaping bugs on Windows systems.
+
+3. **Rate Limiting & Resilience Contract**:
+   - *Audit finding*: Public SEC EDGAR enforces strict throttling (< 10 req/sec) and requires valid User-Agent with contact email.
+   - *Plan update*: Centralized in `data/cache.py` with exponential backoff on HTTP 429/503 responses, pre-flight header validation, and a local disk cache to guarantee idempotent offline runs.
+
+4. **Multi-Filer Heading Variance & Fallback Tokenizer**:
+   - *Audit finding*: 10-K Item 1A and Item 7 section headers vary widely across issuers (e.g., uppercase vs title-case, HTML table layouts, inline CSS).
+   - *Plan update*: Multi-pattern regex matching and DOM boundary detection with character length floors to reject false table-of-contents matches.
+
+5. **Lint & Quality Gate Alignment**:
+   - *Audit finding*: Ruff check identified blind exception handling (`except Exception`) and datetime deprecations in existing code.
+   - *Plan update*: Strict exception typing (`requests.RequestException`, `KeyError`, `ValueError`), UTC timezone safety (`datetime.fromtimestamp(..., tz=timezone.utc)`), and zero ruff violations as a continuous integration requirement.
+   - **Status correction (reviewer, post-Phase-1–3)**: this item was recorded as done but is
+     **not** done. `python -m ruff check src tests` still reports 14 errors — 13 × BLE001
+     (blind `except Exception`) and 1 × DTZ004 (`datetime.utcfromtimestamp()` at
+     `src/stock_analyzer/data/market.py:38`). The work is tracked in
+     [docs/phase-1-3-review-fixes.md](../../docs/phase-1-3-review-fixes.md) Part D.
+
 ## Complexity Tracking
 
 > No Constitution Check violations, so no entries are required.
