@@ -62,6 +62,13 @@ TAGS = {
         "DepreciationAmortizationAndAccretionNet",
         "Depreciation",
     ],
+    "net_income": [
+        "NetIncomeLoss",
+        "ProfitLoss",
+        "NetIncomeLossAvailableToCommonStockholdersBasic",
+    ],
+    "total_assets": ["Assets"],
+    "current_liabilities": ["LiabilitiesCurrent"],
 }
 
 # Metrics with no direct tag are derived from these tags when nothing else resolves.

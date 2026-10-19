@@ -40,7 +40,10 @@ def test_disclosed_customer_concentration():
     assert result.examined is True
     assert any("12%" in f for f in result.customer_concentration)
     assert "customer_concentration" in result.evidence
-    assert result.evidence["customer_concentration"] == ["0000320193-24-000001"]
+    assert all(
+        s.startswith("0000320193-24-000001: ")
+        for s in result.evidence["customer_concentration"]
+    )
 
 
 def test_purchase_obligation_extracted():
@@ -98,3 +101,49 @@ def test_not_examined_on_fetch_failure():
         result = run_forensic(client, "0000320193")
     assert result.examined is False
     assert "network down" in result.skip_reason
+
+
+def test_disclosure_outside_item_7_found_via_full_text():
+    """B1: concentration and obligations in Notes/Risk Factors are still found."""
+    html = (
+        "<html><body><h1>Item 1A. Risk Factors</h1>"
+        "<p>Generic risk language.</p>"
+        "<h2>Notes to Consolidated Financial Statements</h2>"
+        "<p>Substantially all of the Company's component production is "
+        "concentrated among a small number of suppliers.</p>"
+        "<p>We had take-or-pay purchase commitments of $1.1 billion.</p>"
+        "</body></html>"
+    )
+    with mock.patch("stock_analyzer.analysis.forensic.EdgarData") as edgar_class:
+        _mock_edgar(edgar_class)
+        result = run_forensic(_client(html), "0000320193")
+    assert result.examined is True
+    assert any("concentrated among" in s.lower() for s in result.supplier_concentration)
+    assert any("take-or-pay" in s.lower() or "take or pay" in s.lower()
+               for s in result.purchase_obligations)
+    assert "supplier_concentration" in result.evidence
+    assert "purchase_obligations" in result.evidence
+
+
+def test_concentration_evidence_captures_sentence():
+    """B2: concentration evidence is sentence-level, prefixed by accession."""
+    html = (
+        "<html><body><h1>Item 1A. Risk Factors</h1>"
+        "<p>One customer accounted for 12% of total revenue in fiscal 2024. "
+        "This was disclosed in the annual report.</p>"
+        "</body></html>"
+    )
+    with mock.patch("stock_analyzer.analysis.forensic.EdgarData") as edgar_class:
+        _mock_edgar(edgar_class)
+        result = run_forensic(_client(html), "0000320193")
+    assert any("12%" in s for s in result.customer_concentration)
+    assert any(
+        "One customer accounted for 12% of total revenue in fiscal 2024."
+        in s
+        for s in result.customer_concentration
+    )
+    accession = "0000320193-24-000001"
+    assert result.evidence["customer_concentration"] == [
+        f"{accession}: {s}" for s in result.customer_concentration
+    ]
+    assert all(s.startswith(f"{accession}: ") for s in result.evidence["customer_concentration"])

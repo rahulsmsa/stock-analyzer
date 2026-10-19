@@ -153,6 +153,38 @@ def test_depreciation_amortisation_is_populated(series_for, ticker):
     assert series.depreciation_amortisation, f"{ticker} D&A is empty"
 
 
+# --- net income / balance sheet detail (C1, C2) ------------------------------------
+
+
+@pytest.mark.parametrize("ticker", ["AAPL", "MSFT"])
+def test_net_income_is_populated(series_for, ticker):
+    """Net income feeds the locally computed P/E (C2); AAPL and MSFT file it."""
+    series = series_for(ticker)
+    assert series.net_income, f"{ticker} net_income is empty"
+    assert len(series.net_income) == len(series.years)
+    assert series.sources["net_income"][0] == "NetIncomeLoss"
+
+
+@pytest.mark.parametrize("ticker", ["AAPL", "MSFT"])
+def test_total_assets_and_current_liabilities_populated(series_for, ticker):
+    """Assets and current liabilities feed the operating invested capital (C1)."""
+    series = series_for(ticker)
+    assert series.total_assets, f"{ticker} total_assets is empty"
+    assert series.current_liabilities, f"{ticker} current_liabilities is empty"
+    assert len(series.total_assets) == len(series.years)
+    assert len(series.current_liabilities) == len(series.years)
+    assert series.sources["total_assets"][0] == "Assets"
+    assert series.sources["current_liabilities"][0] == "LiabilitiesCurrent"
+
+
+def test_aapl_net_income_matches_known_figures(series_for):
+    """AAPL FY2017 net income was ~$48.4B (FY2025 ~$112B) — sanity, not quarterly."""
+    series = series_for("AAPL")
+    by_year = dict(zip(series.years, series.net_income))
+    assert by_year[2017] == pytest.approx(48_353_000_000, rel=0.02)
+    assert by_year[2025] == pytest.approx(112_010_000_000, rel=0.02)
+
+
 # --- series integrity -------------------------------------------------------------
 
 
@@ -171,6 +203,9 @@ def test_all_series_align_to_years_or_are_empty(series_for, ticker):
         "debt",
         "equity",
         "depreciation_amortisation",
+        "net_income",
+        "total_assets",
+        "current_liabilities",
     ]:
         col = getattr(series, field)
         assert len(col) in (0, len(series.years)), f"{ticker}.{field} has {len(col)} values"

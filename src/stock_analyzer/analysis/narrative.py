@@ -29,19 +29,32 @@ KPI_THEMES = [
 # across periods is detected as a shift, not a drop-and-add (FR-007).
 THEME_SYNONYMS = {"sales": "revenue"}
 
-# Goal-stating verbs.
+# Goal-stating verbs, with common inflections (expects, anticipated, ...).
 GOAL_VERBS = re.compile(
-    r"(?i)\b(target|aim|expect|goal|objective|plan\s+to|intend\s+to|forecast|project)\b"
+    r"(?i)\b("
+    r"target(?:s|ed|ing)?|aim(?:s|ed|ing)?|expect(?:s|ed|ing)?|goal(?:s)?|"
+    r"objective(?:s)?|plan(?:s)?\s+to|intend(?:s)?\s+to|"
+    r"forecast(?:s|ed|ing)?|project(?:s|ed|ing)?|anticipate(?:s|d)?|"
+    r"continue(?:s|d)?\s+to|remain(?:s)?\s+confident|we\s+believe|"
+    r"we\s+expect|focused\s+on|committed\s+to|prioritize(?:s|d)?"
+    r")\b"
 )
 
 
-def _sentence_theme(sentence: str) -> str | None:
-    """Return the normalised KPI theme mentioned in a sentence, or None."""
+def _sentence_themes(sentence: str) -> list[str]:
+    """Return every normalised KPI theme mentioned in a sentence.
+
+    A sentence can carry multiple themes (e.g. both "margin" and "revenue");
+    duplicates after synonym normalisation collapse to the first occurrence.
+    """
     lower = sentence.lower()
+    themes: list[str] = []
     for theme in KPI_THEMES:
         if theme in lower:
-            return THEME_SYNONYMS.get(theme, theme)
-    return None
+            normalized = THEME_SYNONYMS.get(theme, theme)
+            if normalized not in themes:
+                themes.append(normalized)
+    return themes
 
 
 def _split_sentences(text: str) -> list[str]:
@@ -55,19 +68,21 @@ def _extract_goals(text: str) -> list[str]:
     """Pull out sentences that look like stated goals/KPIs.
 
     A sentence qualifies when it mentions a KPI theme and either states a
-    goal verb or carries a concrete figure. Deduplication is at theme level,
-    preserving first-seen order, so near-duplicate phrasings collapse to one
-    entry (FR-006, FR-007).
+    goal verb or carries a concrete figure. A sentence may register multiple
+    themes (one goal entry per theme it mentions). Deduplication is at theme
+    level, preserving first-seen order, so near-duplicate phrasings collapse
+    to one entry (FR-006, FR-007).
     """
     goals: list[str] = []
     seen_themes: set[str] = set()
     for sentence in _split_sentences(text):
-        theme = _sentence_theme(sentence)
-        if theme is None or theme in seen_themes:
+        themes = _sentence_themes(sentence)
+        new_themes = [t for t in themes if t not in seen_themes]
+        if not new_themes:
             continue
         if not GOAL_VERBS.search(sentence) and not re.search(r"\d", sentence):
             continue
-        seen_themes.add(theme)
+        seen_themes.update(new_themes)
         if not sentence.endswith("."):
             sentence += "."
         goals.append(sentence)
@@ -75,13 +90,28 @@ def _extract_goals(text: str) -> list[str]:
 
 
 def _themes(goals: list[str]) -> list[str]:
-    """Classify each goal sentence into its normalised KPI theme."""
+    """Classify each goal sentence into its normalised KPI theme(s)."""
     themes: list[str] = []
     for g in goals:
-        theme = _sentence_theme(g)
-        if theme is not None:
-            themes.append(theme)
+        for theme in _sentence_themes(g):
+            if theme not in themes:
+                themes.append(theme)
     return themes
+
+
+def execution_ratio(audit: NarrativeAudit) -> float | None:
+    """Theme-overlap ratio between Year-1 promises and Year-3 outcomes.
+
+    Returns kept/stated as a fraction of Year-1 themes that still appear in
+    Year-3, or None when the audit is unusable (skipped or no promises).
+    """
+    if audit.synthesis_skipped:
+        return None
+    stated = _themes(audit.promises_year1)
+    if not stated:
+        return None
+    kept = set(stated) & set(_themes(audit.promises_kept_year3))
+    return len(kept) / len(set(stated))
 
 
 def run_narrative_audit(client: EdgarClient, cik: str, years_back: int = 3) -> NarrativeAudit:
@@ -110,6 +140,11 @@ def run_narrative_audit(client: EdgarClient, cik: str, years_back: int = 3) -> N
         for i, form in enumerate(forms)
         if form == "10-K" and i < len(dates) and i < len(docs) and i < len(accessions)
     ][: max(years_back, 0)]
+
+    # EDGAR's recent arrays are newest-first. Sort ascending by filing date so
+    # filings[0] is the OLDEST (Year-1 promises) and filings[-1] the NEWEST
+    # (Year-3 outcomes) — the audit must compare old promises to new results.
+    filings.sort(key=lambda f: f["date"])
 
     if not filings:
         audit.synthesis_skipped = True

@@ -3,7 +3,7 @@
 ## Command surface
 
 ```text
-stock-analyzer analyze TICKER [--output PATH] [--refresh] [--no-llm] [--years N]
+stock-analyzer analyze TICKER [--output PATH] [--refresh] [--no-llm] [--years N] [--peers TICKERS]
 stock-analyzer --version
 stock-analyzer --help
 ```
@@ -19,6 +19,7 @@ stock-analyzer --help
 | `--refresh` | flag | off | Bypasses the cache for market data |
 | `--no-llm` | flag | off | Forces deterministic-only output; narrative and debate are marked as not synthesised |
 | `--years N` | int | 5 | Fiscal years of history; must be 3–5 |
+| `--peers TICKERS` | str | none | Comma-separated peer tickers for the section 1 comparison table; a peer that fails to fetch is skipped with a warning, never fatal |
 
 ## Exit codes
 

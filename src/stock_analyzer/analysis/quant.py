@@ -60,6 +60,10 @@ def compute_quant(series: FinancialSeries, beta: float | None = None) -> QuantRe
     latest_debt = series.debt[-1] if series.debt else None
     latest_equity = series.equity[-1] if series.equity else None
     latest_cash = series.cash[-1] if series.cash else None
+    latest_assets = series.total_assets[-1] if series.total_assets else None
+    latest_current_liabilities = (
+        series.current_liabilities[-1] if series.current_liabilities else None
+    )
 
     # WACC inputs (every assumption disclosed, FR-016, SC-009)
     result.wacc_inputs = {
@@ -78,8 +82,27 @@ def compute_quant(series: FinancialSeries, beta: float | None = None) -> QuantRe
     if latest_oi is not None and latest_debt is not None and latest_equity is not None:
         nopat = latest_oi * (1 - DEFAULT_TAX_RATE)
         invested_capital = (latest_debt or 0) + (latest_equity or 0) - (latest_cash or 0)
-        if invested_capital and invested_capital != 0:
+        # Buyback-heavy companies run down book equity until it is small (or negative)
+        # relative to debt, which makes the financing-side denominator absurdly small
+        # and ROIC absurdly high. When equity is thin relative to debt, fall back to
+        # the operating definition: total assets - cash - non-interest-bearing current
+        # liabilities (G2, C1). The method used is disclosed in ``roic_method``.
+        equity_is_thin = (
+            latest_equity is not None and latest_debt is not None and latest_equity < latest_debt
+        )
+        operating_available = (
+            latest_assets is not None
+            and latest_current_liabilities is not None
+            and latest_cash is not None
+        )
+        if equity_is_thin and operating_available:
+            operating_capital = latest_assets - latest_current_liabilities - latest_cash
+            if operating_capital and operating_capital > 0:
+                result.roic = nopat / operating_capital
+                result.roic_method = "total_assets-current_liabilities-cash"
+        elif invested_capital and invested_capital != 0:
             result.roic = nopat / invested_capital
+            result.roic_method = "debt+equity-cash"
 
     # WACC = (E/V * Re) + (D/V * Rd * (1 - tax))
     # Re = rf + beta * ERP ; assume Rd = rf (simplification)

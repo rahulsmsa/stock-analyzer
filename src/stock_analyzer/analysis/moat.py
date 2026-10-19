@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from stock_analyzer.models import MoatResult
 
@@ -22,6 +22,12 @@ class MoatEvidence:
     network_effects: int
     cost_advantages: int
     intangible_assets: int
+    # Per-pillar rationale strings citing the actual figures behind each
+    # score (keys are the PILLARS names). Optional so positional construction
+    # keeps working.
+    rationales: dict[str, str] = field(default_factory=dict)
+    # Explicit honesty notes: pillars that cannot be evidenced from filings.
+    gaps: list[str] = field(default_factory=list)
 
 
 def score_moat(evidence: MoatEvidence) -> MoatResult:
@@ -49,6 +55,8 @@ def score_moat(evidence: MoatEvidence) -> MoatResult:
         result.rating = "None"
 
     result.primary_source = max(result.pillar_scores, key=result.pillar_scores.get)
+    result.pillar_rationales = dict(evidence.rationales)
+    result.gaps = list(evidence.gaps)
 
     # Bull / Bear debate
     result.bull_case = (

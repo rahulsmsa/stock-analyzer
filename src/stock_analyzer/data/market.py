@@ -8,7 +8,7 @@ import yfinance as yf
 
 from stock_analyzer.config import CACHE_TTL_MARKET
 from stock_analyzer.data.cache import Cache
-from stock_analyzer.models import PriceData
+from stock_analyzer.models import PriceData, ValuationHistory
 
 
 def fetch_price_data(ticker: str, cache: Cache | None = None, refresh: bool = False) -> PriceData:
@@ -34,6 +34,7 @@ def fetch_price_data(ticker: str, cache: Cache | None = None, refresh: bool = Fa
         market_cap = shares * price
 
     pe_ratio = info.get("trailingPE")
+    beta = info.get("beta")
     fcf = info.get("freeCashflow")
     fcf_yield = None
     if fcf and market_cap:
@@ -59,7 +60,7 @@ def fetch_price_data(ticker: str, cache: Cache | None = None, refresh: bool = Fa
         ev_ebitda=None,  # computed locally in cli.py from FinancialSeries (FR-017)
         fcf_yield=float(fcf_yield) if fcf_yield is not None else None,
         as_of=as_of,
-        beta=None,  # derived from price series in cli.py
+        beta=float(beta) if beta else None,  # vendor beta; local derivation in cli.py
         ebitda=None,  # derived from FinancialSeries in cli.py
     )
 
@@ -81,6 +82,75 @@ def _price_data_to_cache(price: PriceData) -> dict:
         "beta": price.beta,
         "ebitda": price.ebitda,
     }
+
+
+def fetch_history_stats(
+    ticker: str,
+    cache: Cache | None = None,
+    refresh: bool = False,
+    current_price: float | None = None,
+) -> ValuationHistory:
+    """5-year monthly-close range stats for the target (F2a).
+
+    A historical average P/E would need historical EPS, which the vendor does not
+    provide per month; the price percentile within the 5y range is used instead.
+    Only the stable range stats (low/high/average/months) are cached, under a
+    history-specific key with ``CACHE_TTL_MARKET``; the percentile is always
+    derived from ``current_price`` (falling back to the latest monthly close).
+    Returns ``months == 0`` with all values None when no history is available —
+    never fabricated values.
+    """
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}#history-5y-monthly"
+    cached = None
+    if cache is not None and not refresh:
+        cached = cache.get(url)
+
+    if cached is not None:
+        low = cached.get("low_5y")
+        high = cached.get("high_5y")
+        average = cached.get("average_5y")
+        months = cached.get("months", 0)
+        last_close = cached.get("last_close")
+    else:
+        closes: list[float] = []
+        try:
+            hist = yf.Ticker(ticker).history(period="5y", interval="1mo")
+            if hist is not None and not hist.empty and "Close" in hist:
+                closes = [float(c) for c in hist["Close"].dropna().tolist()]
+        except Exception:  # noqa: BLE001 — vendor failures must degrade, not abort
+            closes = []
+        if closes:
+            low, high, average = min(closes), max(closes), sum(closes) / len(closes)
+            months, last_close = len(closes), closes[-1]
+        else:
+            low = high = average = last_close = None
+            months = 0
+        if cache is not None:
+            cache.set(
+                url,
+                {
+                    "low_5y": low,
+                    "high_5y": high,
+                    "average_5y": average,
+                    "months": months,
+                    "last_close": last_close,
+                },
+                ttl=CACHE_TTL_MARKET,
+            )
+
+    price = current_price if current_price is not None else last_close
+    percentile = None
+    if price is not None and low is not None and high is not None and high > low:
+        percentile = min(1.0, max(0.0, (price - low) / (high - low)))
+
+    return ValuationHistory(
+        price=price,
+        low_5y=low,
+        high_5y=high,
+        average_5y=average,
+        percentile=percentile,
+        months=months,
+    )
 
 
 def _price_data_from_cached(ticker: str, cached: dict) -> PriceData:

@@ -15,7 +15,7 @@ from stock_analyzer.analysis.narrative import run_narrative_audit
 from stock_analyzer.analysis.quant import QuantResult, compute_quant
 from stock_analyzer.data.cache import Cache, EdgarClient
 from stock_analyzer.data.edgar import EdgarData, FilingNotFoundError
-from stock_analyzer.data.market import fetch_price_data
+from stock_analyzer.data.market import fetch_history_stats, fetch_price_data
 from stock_analyzer.data.xbrl import normalize_financials
 from stock_analyzer.llm import NOT_SYNTHESISED, write_bull_bear_debate, write_narrative_prose
 from stock_analyzer.models import (
@@ -25,8 +25,10 @@ from stock_analyzer.models import (
     ForensicResult,
     MoatResult,
     NarrativeAudit,
+    PeerData,
     PriceData,
     Report,
+    SensitivityRow,
 )
 from stock_analyzer.report import render, write_report
 
@@ -36,15 +38,33 @@ def _deriv_beta(series: FinancialSeries) -> float | None:
     return None
 
 
-def _deriv_ebitda(series: FinancialSeries) -> float | None:
-    """EBITDA = operating_income + depreciation & amortisation.
+def _compute_pe(price: PriceData, series: FinancialSeries) -> float | None:
+    """P/E = price * shares_outstanding / net_income, from XBRL annuals (C2).
 
-    D&A is not yet in FinancialSeries, so operating_income is used as a proxy and a gap
-    is recorded by the caller when unavailable.
+    Preferred over the vendor ``trailingPE`` which can be stale or absent. Returns
+    None (never 0.0) when shares or net income are unavailable or net income is
+    zero/negative (P/E is not meaningful for loss-makers).
+    """
+    if not series.net_income or price.shares_outstanding is None or not price.price:
+        return None
+    net_income = series.net_income[-1]
+    if net_income is None or net_income <= 0:
+        return None
+    return price.price * price.shares_outstanding / net_income
+
+
+def _deriv_ebitda(series: FinancialSeries) -> float | None:
+    """EBITDA = operating_income + depreciation & amortisation (data-model §6).
+
+    D&A is unavailable for some filers; operating_income alone is then used as a
+    proxy and the caller records a gap.
     """
     if not series.operating_income:
         return None
-    return series.operating_income[-1]
+    ebitda = series.operating_income[-1]
+    if series.depreciation_amortisation:
+        ebitda = ebitda + series.depreciation_amortisation[-1]
+    return ebitda
 
 
 def _compute_ev_ebitda(price: PriceData, ebitda: float | None, series: FinancialSeries) -> float | None:
@@ -57,6 +77,64 @@ def _compute_ev_ebitda(price: PriceData, ebitda: float | None, series: Financial
     return enterprise_value / ebitda
 
 
+def _fetch_peers(
+    tickers: list[str], cache: Cache, refresh: bool, warnings: list[str]
+) -> list[PeerData]:
+    """Fetch market data for each peer ticker (F1).
+
+    A peer that cannot be fetched is skipped with a warning — a bad peer must
+    never abort the run. No CIK resolution is needed; market data only.
+    """
+    peers: list[PeerData] = []
+    for peer in tickers:
+        try:
+            data = fetch_price_data(peer, cache=cache, refresh=refresh)
+        except Exception as exc:  # noqa: BLE001 — peer failures degrade, never abort
+            msg = f"peer {peer}: market data unavailable, skipped ({exc})"
+            print(f"warning: {msg}", file=sys.stderr)
+            warnings.append(msg)
+            continue
+        peers.append(
+            PeerData(
+                ticker=data.ticker,
+                price=data.price,
+                market_cap=data.market_cap,
+                pe_ratio=data.pe_ratio,
+                fcf_yield=data.fcf_yield,
+            )
+        )
+    return peers
+
+
+def _compute_sensitivity(price: PriceData) -> list[SensitivityRow]:
+    """Deterministic price-shock sensitivity table (F2b).
+
+    FCF yield scales inversely with price (fcf_yield * current_price / new_price);
+    EV/EBITDA scales linearly with the equity-value shock because debt, cash and
+    EBITDA are held constant. All inputs are already-computed values — no DCF.
+    """
+    rows: list[SensitivityRow] = []
+    if not price.price:
+        return rows
+    for change in (-0.20, -0.10, 0.0, 0.10, 0.20):
+        new_price = price.price * (1.0 + change)
+        fcf_yield = None
+        if price.fcf_yield is not None and new_price:
+            fcf_yield = price.fcf_yield * price.price / new_price
+        ev_ebitda = None
+        if price.ev_ebitda is not None:
+            ev_ebitda = price.ev_ebitda * (1.0 + change)
+        rows.append(
+            SensitivityRow(
+                price_change=change,
+                price=new_price,
+                fcf_yield=fcf_yield,
+                ev_ebitda=ev_ebitda,
+            )
+        )
+    return rows
+
+
 def analyze(
     ticker: str,
     *,
@@ -64,6 +142,7 @@ def analyze(
     refresh: bool = False,
     no_llm: bool = False,
     years: int = 5,
+    peers: list[str] | None = None,
 ) -> Path:
     """Run the full 4-step analysis and write the report. Returns report path."""
     warnings: list[str] = []
@@ -140,12 +219,37 @@ def analyze(
         print(f"error: market data unavailable for {ticker}: {exc}", file=sys.stderr)
         raise SystemExit(1)
 
-    # Derive beta and ebitda
-    beta = _deriv_beta(series)
+    # Derive beta and ebitda. Beta: local derivation first, then the vendor value
+    # from yfinance (C3) — never silently default to 1.0 when a real value exists.
+    beta = _deriv_beta(series) or price.beta
     ebitda = _deriv_ebitda(series)
     price.beta = beta
     price.ebitda = ebitda
     price.ev_ebitda = _compute_ev_ebitda(price, ebitda, series)
+
+    # P/E: prefer the locally computed value from XBRL annuals over the vendor's
+    # possibly stale trailingPE (C2).
+    local_pe = _compute_pe(price, series)
+    if local_pe is not None:
+        price.pe_ratio = local_pe
+
+    # Peer comparison (F1) — failures are skipped with a warning, never fatal
+    peer_list: list[PeerData] = []
+    if peers:
+        print(f"Fetching peer market data ({', '.join(peers)})...", file=sys.stderr)
+        peer_list = _fetch_peers([p.strip().upper() for p in peers if p.strip()], cache, refresh, warnings)
+
+    # Valuation vs own history (F2a) — degrades to a gap statement, never fatal
+    try:
+        valuation_history = fetch_history_stats(
+            ticker, cache=cache, refresh=refresh, current_price=price.price or None
+        )
+    except Exception as exc:  # noqa: BLE001 — history failure degrades, never aborts
+        valuation_history = None
+        warnings.append(f"5y price history unavailable: {exc}")
+
+    # Sensitivity table (F2b) — deterministic, derived from computed values only
+    sensitivity = _compute_sensitivity(price)
 
     # Quant (Step 4) — pass derived beta so WACC inputs record source
     quant = compute_quant(series, beta=beta)
@@ -200,11 +304,40 @@ def analyze(
     moat_prose_bull, moat_prose_bear = NOT_SYNTHESISED, NOT_SYNTHESISED
     if not no_llm:
         try:
+            conc_ev = list(forensic.evidence.get("customer_concentration", [])) + list(
+                forensic.evidence.get("supplier_concentration", [])
+            )
             moat_ctx = (
                 f"Pillar scores: {moat.pillar_scores}\n"
                 f"Rating: {moat.rating}\n"
                 f"Primary source: {moat.primary_source}\n"
-                f"Existential threat: {moat.existential_threat}"
+                f"Existential threat: {moat.existential_threat}\n"
+                "Pillar rationales (cite these figures verbatim):\n"
+                + "\n".join(
+                    f"- {pillar}: {moat.pillar_rationales.get(pillar, 'n/a')}"
+                    for pillar in moat.pillar_scores
+                )
+                + "\nForensic concentration evidence sentences:\n"
+                + ("\n".join(f"- {s}" for s in conc_ev[:5]) if conc_ev else "- none disclosed")
+                + "\nFigures: "
+                + (
+                    f"gross margin {quant.gross_margin[0]*100:.1f}%->{quant.gross_margin[-1]*100:.1f}%; "
+                    if quant.gross_margin
+                    and quant.gross_margin[0] is not None
+                    and quant.gross_margin[-1] is not None
+                    else ""
+                )
+                + f"operating leverage {quant.operating_leverage_score}; "
+                + (
+                    f"ROIC {quant.roic*100:.1f}%, WACC {quant.wacc*100:.1f}%, "
+                    if quant.roic is not None and quant.wacc is not None
+                    else ""
+                )
+                + (
+                    f"SG&A/revenue {((series.sga[-1] or 0.0)/series.revenue[-1])*100:.1f}%"
+                    if series.sga and series.revenue and series.revenue[-1]
+                    else "SG&A/revenue n/a"
+                )
             )
             moat_prose_bull, moat_prose_bear = write_bull_bear_debate(moat_ctx)
         except (requests.RequestException, ValueError) as exc:
@@ -230,6 +363,9 @@ def analyze(
         filings_used=filings,
         warnings=warnings,
         years=series.years,
+        peers=peer_list,
+        valuation_history=valuation_history,
+        sensitivity=sensitivity,
     )
 
     print(f"[6/6] Writing report for {ticker.upper()}...", file=sys.stderr)
@@ -243,44 +379,110 @@ def analyze(
 def _derive_moat_evidence(
     forensic: ForensicResult, quant: QuantResult, series: FinancialSeries
 ) -> MoatEvidence:
-    """Derive the four Morningstar pillar scores from forensic and quant results.
+    """Derive the four Morningstar pillar scores from real data signals.
 
-    Mapping (documented for auditability):
-      - Switching Costs: customer concentration (low concentration -> higher score)
-      - Network Effects: not directly measurable from filings -> 0 with gap recorded
-      - Cost Advantages: gross-margin trend + operating leverage
-      - Intangible Assets: accounting-policy stability (no changes -> higher score)
-
-    Pillars that cannot be evidenced score 0 and the reason is recorded in
-    MoatResult.evidence by the caller.
+    Each pillar score is grounded in observable figures and carries a
+    rationale string citing those figures (D1):
+      - Switching Costs: forensic concentration evidence cuts both ways —
+        supplier/customer concentration is dependency risk but often implies
+        deep integration; score low-to-mid and record the evidence sentences.
+      - Network Effects: not measurable from filings -> 0 with an explicit gap.
+      - Cost Advantages: operating leverage + gross-margin trend.
+      - Intangible Assets: R&D intensity (SG&A/revenue proxy — no dedicated
+        R&D series is extracted) + gross-margin trend (pricing power).
     """
-    switching_costs = 2
-    if forensic.customer_concentration:
-        switching_costs = 0  # high concentration = low switching power
-    elif len(series.revenue) >= 2 and series.revenue[-1] > series.revenue[0]:
-        switching_costs = 3  # growing revenue suggests retention
+    rationales: dict[str, str] = {}
+    gaps: list[str] = []
 
-    network_effects = 0  # not derivable from 10-K filings alone
+    # --- Gross-margin trend (shared signal) ---
+    gm_first = quant.gross_margin[0] if quant.gross_margin else None
+    gm_last = quant.gross_margin[-1] if quant.gross_margin else None
+    gm_trend = ""
+    if gm_first is not None and gm_last is not None:
+        span = len(quant.gross_margin)
+        gm_trend = (
+            f"gross margin {gm_first*100:.1f}%->{gm_last*100:.1f}% over {span}y"
+        )
 
+    # --- Switching Costs: concentration evidence cuts both ways ---
+    conc_sentences = list(forensic.evidence.get("customer_concentration", [])) + list(
+        forensic.evidence.get("supplier_concentration", [])
+    )
+    if conc_sentences:
+        switching_costs = 2
+        sample = conc_sentences[0]
+        rationales["Switching Costs"] = (
+            f"{len(conc_sentences)} concentration disclosure(s) in filings — "
+            "dependency risk cuts both ways (deep integration vs. lock-in); "
+            f"e.g. {sample}"
+        )
+    else:
+        switching_costs = 1
+        rationales["Switching Costs"] = (
+            "no concentration disclosures found; switching costs not evidenced from filings"
+        )
+
+    # --- Network Effects: honest gap ---
+    network_effects = 0
+    gaps.append("Network Effects: not measurable from 10-K filings; scored 0")
+    rationales["Network Effects"] = (
+        "no filing-based signal; network effects are not measurable from 10-K disclosures"
+    )
+
+    # --- Cost Advantages: operating leverage + gross-margin trend ---
     cost_advantages = 2
-    if quant.gross_margin:
-        latest_gm = quant.gross_margin[-1]
-        if latest_gm is not None and latest_gm > 0.4:
+    leverage = quant.operating_leverage_score
+    if gm_first is not None and gm_last is not None:
+        if gm_last >= gm_first and leverage == "Positive":
             cost_advantages = 4
-        elif latest_gm is not None and latest_gm > 0.2:
+        elif gm_last >= gm_first or leverage == "Positive":
             cost_advantages = 3
-    if quant.operating_leverage_score == "Positive":
-        cost_advantages = min(5, cost_advantages + 1)
+        else:
+            cost_advantages = 1
+    elif leverage == "Positive":
+        cost_advantages = 3
+    if gm_trend:
+        rationales["Cost Advantages"] = (
+            f"operating leverage {leverage}; {gm_trend}"
+        )
+    else:
+        rationales["Cost Advantages"] = (
+            f"operating leverage {leverage}; gross-margin trend unavailable"
+        )
 
-    intangible_assets = 3
-    if forensic.accounting_changes:
-        intangible_assets = 1  # frequent accounting changes erode intangible trust
+    # --- Intangible Assets: R&D intensity (SG&A proxy) + margin trend ---
+    intangible_assets = 2
+    rd_note = "SG&A/revenue used as R&D-intensity proxy (no dedicated R&D series)"
+    if series.sga and series.revenue and series.revenue[-1]:
+        sga_intensity = (series.sga[-1] or 0.0) / series.revenue[-1]
+        if sga_intensity >= 0.15:
+            intangible_assets = 4
+        elif sga_intensity >= 0.08:
+            intangible_assets = 3
+        elif sga_intensity > 0:
+            intangible_assets = 2
+        if gm_last is not None and gm_first is not None and gm_last > gm_first:
+            intangible_assets = min(5, intangible_assets + 1)
+        rationales["Intangible Assets"] = (
+            f"R&D intensity {sga_intensity*100:.1f}% of revenue ({rd_note}); {gm_trend}"
+            if gm_trend
+            else f"R&D intensity {sga_intensity*100:.1f}% of revenue ({rd_note})"
+        )
+    else:
+        gaps.append("Intangible Assets: SG&A/revenue unavailable; scored from margin trend only")
+        if gm_last is not None and gm_first is not None and gm_last > gm_first:
+            intangible_assets = 3
+        rationales["Intangible Assets"] = (
+            f"{rd_note}; SG&A series unavailable; {gm_trend or 'margin trend unavailable'}"
+        )
 
     return MoatEvidence(
         switching_costs=switching_costs,
         network_effects=network_effects,
         cost_advantages=cost_advantages,
         intangible_assets=intangible_assets,
+        rationales=rationales,
+        gaps=gaps,
     )
 
 
@@ -298,6 +500,12 @@ def main() -> None:
     analyze_p.add_argument(
         "--years", type=int, default=5, help="Fiscal years of history (3-5)"
     )
+    analyze_p.add_argument(
+        "--peers",
+        type=str,
+        default=None,
+        help="Comma-separated peer tickers for comparison (e.g. MSFT,NVDA)",
+    )
     parser.add_argument("--version", action="version", version="stock-analyzer 0.1.0")
 
     args = parser.parse_args()
@@ -313,6 +521,7 @@ def main() -> None:
                 refresh=args.refresh,
                 no_llm=args.no_llm,
                 years=args.years,
+                peers=[p.strip() for p in args.peers.split(",")] if args.peers else None,
             )
         except SystemExit:
             raise

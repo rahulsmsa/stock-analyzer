@@ -40,3 +40,22 @@ def test_identical_evidence_identical_rating():
     assert m1.rating == m2.rating
     assert m1.pillar_scores == m2.pillar_scores
     assert m1.primary_source == m2.primary_source
+
+
+def test_rationales_default_empty_and_propagated():
+    # Defaulted fields keep positional construction working
+    m = score_moat(MoatEvidence(2, 2, 2, 2))
+    assert m.pillar_rationales == {}
+    assert m.gaps == []
+
+    ev = MoatEvidence(
+        2,
+        0,
+        4,
+        3,
+        rationales={"Switching Costs": "concentration evidence cited"},
+        gaps=["Network Effects: not measurable from filings"],
+    )
+    m = score_moat(ev)
+    assert m.pillar_rationales["Switching Costs"] == "concentration evidence cited"
+    assert m.gaps == ["Network Effects: not measurable from filings"]

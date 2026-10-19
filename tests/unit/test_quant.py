@@ -6,6 +6,8 @@ meaningful** result for a negative denominator such as negative operating cash
 flow (FR-013, FR-014, FR-015).
 """
 
+import pytest
+
 from stock_analyzer.analysis.quant import compute_quant
 from stock_analyzer.models import FinancialSeries
 
@@ -80,3 +82,54 @@ def test_wacc_inputs_record_sources():
     q2 = compute_quant(_series())  # no beta -> default 1.0
     assert q2.wacc_inputs["beta"] == 1.0
     assert q2.wacc_input_sources["beta"] == "default"
+
+
+# --- ROIC denominator (C1) ---------------------------------------------------------
+
+
+def test_roic_classic_method_disclosed_when_equity_is_healthy():
+    """Normal capital structure -> financing-side denominator, method disclosed."""
+    q = compute_quant(_series())  # equity 70 > debt 40
+    nopat = 40 * (1 - 0.21)
+    invested_capital = 40 + 70 - 15
+    assert q.roic == pytest.approx(nopat / invested_capital)
+    assert q.roic_method == "debt+equity-cash"
+
+
+def test_roic_thin_equity_uses_operating_invested_capital():
+    """Buyback-heavy profile (equity < debt) must not produce an absurd ROIC (C1).
+
+    Classic denominator = 90 + 6 - 30 = 66 -> ROIC = 31.6/66 = 48%... but with a
+    thinner equity the classic figure explodes. The operating denominator
+    (assets - current liabilities - cash) keeps ROIC sane and the method is
+    disclosed.
+    """
+    s = _series(
+        operating_income=[20, 25, 40],
+        cash=[30, 30, 30],
+        debt=[90, 90, 90],
+        equity=[6, 6, 6],
+        total_assets=[340, 340, 340],
+        current_liabilities=[120, 120, 120],
+    )
+    q = compute_quant(s)
+    nopat = 40 * (1 - 0.21)
+    operating_capital = 340 - 120 - 30
+    assert q.roic == pytest.approx(nopat / operating_capital)
+    assert q.roic_method == "total_assets-current_liabilities-cash"
+    assert q.roic < 0.60, f"ROIC still absurd: {q.roic:.1%}"
+
+
+def test_roic_thin_equity_without_operating_inputs_falls_back_to_classic():
+    """Thin equity but no balance-sheet detail -> classic denominator, still disclosed."""
+    s = _series(debt=[90, 90, 90], equity=[6, 6, 6])
+    q = compute_quant(s)
+    nopat = 40 * (1 - 0.21)
+    assert q.roic == pytest.approx(nopat / (90 + 6 - 15))
+    assert q.roic_method == "debt+equity-cash"
+
+
+def test_roic_none_when_no_operating_income():
+    q = compute_quant(_series(operating_income=[]))
+    assert q.roic is None
+    assert q.roic_method == ""

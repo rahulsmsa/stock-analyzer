@@ -18,6 +18,8 @@ pip install -e ".[dev]"
 
 ```bash
 stock-analyzer analyze AAPL
+stock-analyzer analyze AAPL --peers MSFT,NVDA
+stock-analyzer analyze AAPL --no-llm
 ```
 
 This writes a six-section Markdown report to `reports/AAPL-<YYYY-MM-DD>.md`:
@@ -30,6 +32,22 @@ This writes a six-section Markdown report to `reports/AAPL-<YYYY-MM-DD>.md`:
 6. Final Investment Verdict
 
 Exit codes: `0` success, `1` fatal data error (see `specs/001-institutional-equity-research-cli/contracts/cli.md`).
+
+## LLM prose synthesis (optional)
+
+Provider priority: **OpenRouter → OpenAI → deterministic fallback**. Every number in LLM prose must already appear in the computed context (grounding gate); ungrounded output is rejected.
+
+```bash
+# OpenRouter (preferred)
+set OPENROUTER_API_KEY=...
+set OPENROUTER_MODEL=openai/gpt-4o-mini   # optional, this is the default
+
+# OpenAI fallback
+set OPENAI_API_KEY=...
+set OPENAI_MODEL=gpt-4o-mini              # optional
+```
+
+Without any key, or on any provider failure, the CLI degrades gracefully to deterministic prose and still exits 0.
 
 ## Data sources
 

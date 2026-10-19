@@ -48,6 +48,43 @@ def _try_openai(prompt: str) -> str | None:
         return None
 
 
+def _try_openrouter(prompt: str) -> str | None:
+    """Call OpenRouter's OpenAI-compatible chat completion endpoint (E1).
+
+    Returns None on any failure (missing key, network error, non-200, empty
+    content) so callers can fall back to the next provider.
+    """
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        return None
+    try:
+        resp = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens": 600,
+            },
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            return None
+        content = resp.json()["choices"][0]["message"]["content"]
+        return content if content else None
+    except (requests.RequestException, ValueError, KeyError, IndexError, TypeError):
+        return None
+
+
+def _synthesise(prompt: str) -> str | None:
+    """Try providers in priority order: OpenRouter, then OpenAI."""
+    return _try_openrouter(prompt) or _try_openai(prompt)
+
+
 def write_narrative_prose(context: str) -> str:
     """Write Step 1 narrative audit prose. Falls back to deterministic summary."""
     prompt = (
@@ -56,7 +93,7 @@ def write_narrative_prose(context: str) -> str:
         "Flag dropped or renamed KPIs. Be specific and avoid hallucinating numbers.\n\n"
         f"{context}"
     )
-    prose = _try_openai(prompt)
+    prose = _synthesise(prompt)
     if prose and _is_grounded(prose, context):
         return prose
     return NOT_SYNTHESISED
@@ -71,17 +108,39 @@ def write_bull_bear_debate(context: str) -> tuple[str, str]:
         "You are an equity research analyst. Based on the following computed moat context, "
         "write a Bull-vs-Bear debate highlighting the single most existential threat "
         "to the economic moat. Be specific and avoid hallucinating numbers.\n\n"
+        "Format your reply with exactly two sections, each starting with a marker line:\n"
+        "### BULL\n<the bull case>\n"
+        "### BEAR\n<the bear case>\n\n"
         f"{context}"
     )
-    prose = _try_openai(prompt)
-    if prose and _is_grounded(prose, context):
-        # Best-effort split: look for a Bear marker; otherwise treat whole as bull.
-        if "Bear" in prose or "BEAR" in prose:
-            parts = re.split(r"(?i)\bBear\b", prose, maxsplit=1)
-            bull = parts[0].strip()
-            bear = ("Bear " + parts[1]).strip() if len(parts) > 1 else prose
-        else:
-            bull = prose.strip()
-            bear = prose.strip()
-        return bull, bear
+    prose = _synthesise(prompt)
+    if prose:
+        bull, bear = _split_debate(prose)
+        return (
+            bull if _is_grounded(bull, context) else NOT_SYNTHESISED,
+            bear if _is_grounded(bear, context) else NOT_SYNTHESISED,
+        )
     return NOT_SYNTHESISED, NOT_SYNTHESISED
+
+
+def _split_debate(prose: str) -> tuple[str, str]:
+    """Split debate prose into (bull, bear) via ### BULL / ### BEAR markers (E2).
+
+    Falls back to a best-effort heuristic when the markers are absent.
+    """
+    match = re.search(r"(?im)^#{0,6}\s*BULL\s*$", prose)
+    if match:
+        bull = prose[match.end() :].strip()
+        bear_match = re.search(r"(?im)^#{0,6}\s*BEAR\s*$", bull)
+        if bear_match:
+            bear = bull[bear_match.end() :].strip()
+            bull = bull[: bear_match.start()].strip()
+            return bull, bear
+        return bull, bull
+    # Legacy heuristic: split on the word "Bear"; otherwise treat whole as bull.
+    if re.search(r"(?i)\bBear\b", prose):
+        parts = re.split(r"(?i)\bBear\b", prose, maxsplit=1)
+        bull = parts[0].strip()
+        bear = ("Bear " + parts[1]).strip() if len(parts) > 1 else prose
+        return bull, bear
+    return prose.strip(), prose.strip()

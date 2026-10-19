@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from stock_analyzer.analysis.narrative import execution_ratio
 from stock_analyzer.config import REPORTS_DIR
 from stock_analyzer.models import NarrativeAudit, Report
 
@@ -19,6 +20,13 @@ def _num(val) -> str:
     if val is None:
         return "n/a"
     return f"{val:,.2f}"
+
+
+def _big_num(val) -> str:
+    """Market cap in $bn, or n/a — raw floats are unreadable in a table."""
+    if val is None:
+        return "n/a"
+    return f"{val/1e9:,.0f}"
 
 
 def _list_or(items, empty_label="n/a") -> str:
@@ -60,6 +68,22 @@ def render(report: Report) -> str:
     lines.append(f"- **Economic Moat Rating:** {report.moat.rating or 'n/a'}")
     exec_score = _execution_score(report.narrative)
     lines.append(f"- **Management Execution Score:** {exec_score}")
+    if report.peers:
+        lines.append("")
+        lines.append("### Peer Comparison")
+        lines.append("")
+        lines.append("| Ticker | Price ($) | Market Cap ($bn) | P/E | FCF Yield |")
+        lines.append("|---|---:|---:|---:|---:|")
+        lines.append(
+            f"| **{report.ticker}** (target) | {_num(report.price.price)} | "
+            f"{_big_num(report.price.market_cap)} | {_num(report.price.pe_ratio)} | "
+            f"{_pct(report.price.fcf_yield)} |"
+        )
+        for peer in report.peers:
+            lines.append(
+                f"| {peer.ticker} | {_num(peer.price)} | {_big_num(peer.market_cap)} | "
+                f"{_num(peer.pe_ratio)} | {_pct(peer.fcf_yield)} |"
+            )
     lines.append("")
 
     # Section 2
@@ -111,6 +135,13 @@ def render(report: Report) -> str:
     # Section 4
     lines.append("## 4. Economic Moat & Competitive Threat Analysis")
     lines.append(f"- **Primary Moat Source:** {report.moat.primary_source or 'n/a'}")
+    if report.moat.pillar_rationales:
+        lines.append("- **Pillar Scoring Rationale:**")
+        for pillar, rationale in report.moat.pillar_rationales.items():
+            lines.append(f"  - {pillar} — {rationale}")
+    if report.moat.gaps:
+        lines.append("- **Scoring Gaps:**")
+        lines.append(_list_or(report.moat.gaps))
     lines.append(f"- **Bull Case Thesis:** {report.moat.bull_case or 'not synthesised'}")
     lines.append(f"- **Bear Case Thesis:** {report.moat.bear_case or 'not synthesised'}")
     if report.moat.synthesis_skipped:
@@ -146,12 +177,39 @@ def render(report: Report) -> str:
         f"- **ROIC vs WACC Gap:** {_pct(report.quant.roic_wacc_spread)} "
         f"(ROIC {_pct(report.quant.roic)}, WACC {_pct(report.quant.wacc)})"
     )
+    if report.quant.roic_method:
+        lines.append(f"  - ROIC method: invested capital = {report.quant.roic_method}")
     # WACC assumptions disclosure (FR-016, SC-009)
     if report.quant.wacc_inputs:
         lines.append("  - WACC assumptions:")
         for key, val in report.quant.wacc_inputs.items():
             src = report.quant.wacc_input_sources.get(key, "default")
             lines.append(f"    - {key}: {val} ({src})")
+
+    # Valuation vs own 5y history (F2a)
+    vh = report.valuation_history
+    if vh is not None and vh.months > 0 and vh.percentile is not None:
+        lines.append(
+            f"- **Price vs 5y Range:** {_pct(vh.percentile)} percentile "
+            f"(5y low {_num(vh.low_5y)}, average {_num(vh.average_5y)}, "
+            f"high {_num(vh.high_5y)}; {vh.months} monthly closes)"
+        )
+    else:
+        lines.append("- **Price vs 5y Range:** n/a — 5y price history unavailable")
+
+    # Sensitivity table (F2b) — deterministic, no DCF
+    if report.sensitivity:
+        lines.append("- **Valuation Sensitivity (price shock):**")
+        lines.append("")
+        lines.append("| Price Change | Price ($) | FCF Yield | EV/EBITDA |")
+        lines.append("|---:|---:|---:|---:|")
+        for row in report.sensitivity:
+            label = f"{row.price_change*100:+.0f}%"
+            marker = " (current)" if row.price_change == 0.0 else ""
+            lines.append(
+                f"| {label}{marker} | {_num(row.price)} | {_pct(row.fcf_yield)} | "
+                f"{_num(row.ev_ebitda)} |"
+            )
     # Gaps (FR-022)
     if report.quant.gaps if hasattr(report.quant, 'gaps') else False:
         pass  # QuantResult has no gaps; series gaps rendered below
@@ -192,13 +250,15 @@ def render(report: Report) -> str:
 
 
 def _execution_score(narrative: NarrativeAudit) -> str:
-    if narrative.synthesis_skipped:
+    """Score management execution from the theme-overlap ratio (A3).
+
+    The ratio is the fraction of Year-1 promised KPI themes that still appear
+    in the Year-3 filing; it is None when the audit was skipped or no
+    promises were extracted.
+    """
+    ratio = execution_ratio(narrative)
+    if ratio is None:
         return "n/a"
-    total = len(narrative.promises_year1)
-    if total == 0:
-        return "n/a"
-    kept = len(narrative.promises_kept_year3)
-    ratio = kept / total
     if ratio >= 0.75:
         return "High"
     if ratio >= 0.5:

@@ -70,6 +70,39 @@ class PriceData:
 
 
 @dataclass
+class PeerData:
+    """One peer's market snapshot for the section-1 comparison table (F1)."""
+
+    ticker: str
+    price: float | None = None
+    market_cap: float | None = None
+    pe_ratio: float | None = None
+    fcf_yield: float | None = None
+
+
+@dataclass
+class ValuationHistory:
+    """Target price versus its own 5-year monthly-close range (F2a)."""
+
+    price: float | None = None
+    low_5y: float | None = None
+    high_5y: float | None = None
+    average_5y: float | None = None
+    percentile: float | None = None  # 0.0-1.0 position of price within the 5y range
+    months: int = 0
+
+
+@dataclass
+class SensitivityRow:
+    """One price-shock row of the deterministic sensitivity table (F2b)."""
+
+    price_change: float  # e.g. -0.20 for -20%
+    price: float | None = None
+    fcf_yield: float | None = None
+    ev_ebitda: float | None = None
+
+
+@dataclass
 class FinancialSeries:
     """3–5 year annual series of normalized financials."""
 
@@ -84,6 +117,9 @@ class FinancialSeries:
     debt: list[float] = field(default_factory=list)
     equity: list[float] = field(default_factory=list)
     depreciation_amortisation: list[float] = field(default_factory=list)
+    net_income: list[float] = field(default_factory=list)
+    total_assets: list[float] = field(default_factory=list)
+    current_liabilities: list[float] = field(default_factory=list)
     sources: dict[str, list[str]] = field(default_factory=dict)
     gaps: list[str] = field(default_factory=list)
 
@@ -97,6 +133,7 @@ class QuantResult:
     fcf_conversion: list[float] = field(default_factory=list)
     operating_leverage_score: str = "Negative"
     roic: float | None = None
+    roic_method: str = ""
     wacc: float | None = None
     roic_wacc_spread: float | None = None
     wacc_inputs: dict[str, float] = field(default_factory=dict)
@@ -142,6 +179,8 @@ class MoatResult:
     bear_case: str = ""
     existential_threat: str = ""
     evidence: dict[str, list[str]] = field(default_factory=dict)
+    pillar_rationales: dict[str, str] = field(default_factory=dict)
+    gaps: list[str] = field(default_factory=list)
     synthesis_skipped: bool = False
 
 
@@ -161,3 +200,6 @@ class Report:
     filings_used: list[Filing] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     years: list[int] = field(default_factory=list)
+    peers: list[PeerData] = field(default_factory=list)
+    valuation_history: ValuationHistory | None = None
+    sensitivity: list[SensitivityRow] = field(default_factory=list)
