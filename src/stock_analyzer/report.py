@@ -227,12 +227,17 @@ def render(report: Report) -> str:
     )
     lines.append("")
 
-    # Provenance (FR-021)
-    if report.filings_used:
+    # Provenance (FR-021); transcripts appear per feature-002 FR-004
+    provenance_items = [f"  - {f.form} {f.accession} filed {f.filed_date.isoformat()} ({f.url})" for f in report.filings_used]
+    transcript_items = [d for d in report.narrative.documents_used if d.startswith("transcript ")]
+    if provenance_items or transcript_items:
         lines.append("## Provenance")
-        lines.append("- **Filings used:**")
-        for f in report.filings_used:
-            lines.append(f"  - {f.form} {f.accession} filed {f.filed_date.isoformat()} ({f.url})")
+        if provenance_items:
+            lines.append("- **Filings used:**")
+            lines.extend(provenance_items)
+        if transcript_items:
+            lines.append("- **Transcripts used:**")
+            lines.extend(f"  - {d}" for d in transcript_items)
         lines.append("")
 
     # Warnings (FR-024a)

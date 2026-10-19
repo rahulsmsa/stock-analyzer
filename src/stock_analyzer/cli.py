@@ -257,7 +257,7 @@ def analyze(
     # Step 1: Narrative audit
     print(f"[5/6] Running narrative audit for {cik}...", file=sys.stderr)
     try:
-        narrative = run_narrative_audit(client, cik, years_back=min(years, 5))
+        narrative = run_narrative_audit(client, cik, years_back=min(years, 5), ticker=ticker)
     except (requests.RequestException, ValueError, KeyError) as exc:
         narrative = NarrativeAudit()
         narrative.synthesis_skipped = True

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from bs4 import BeautifulSoup
 
@@ -114,7 +115,35 @@ def execution_ratio(audit: NarrativeAudit) -> float | None:
     return len(kept) / len(set(stated))
 
 
-def run_narrative_audit(client: EdgarClient, cik: str, years_back: int = 3) -> NarrativeAudit:
+def _load_transcripts(ticker: str) -> dict[int, str]:
+    """Load cached earnings-call transcripts for a ticker, keyed by fiscal year.
+
+    Files live under ``.cache/transcripts/<TICKER>/<FYxxQy>.txt`` and are named
+    like ``FY24Q1.txt``. Each file is assigned to the fiscal year it covers; a
+    file with an unrecognisable name is ignored rather than misattributed.
+    """
+    base = Path(".cache") / "transcripts" / ticker.upper()
+    if not base.is_dir():
+        return {}
+    by_year: dict[int, str] = {}
+    for path in sorted(base.glob("*.txt")):
+        match = re.match(r"FY(\d{2})Q([1-4])", path.stem.upper())
+        if not match:
+            continue
+        fy = 2000 + int(match.group(1))
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        by_year[fy] = by_year.get(fy, "") + "\n" + text
+    return by_year
+
+
+def run_narrative_audit(
+    client: EdgarClient,
+    cik: str,
+    years_back: int = 3,
+    *,
+    transcripts: dict[int, str] | None = None,
+    ticker: str = "",
+) -> NarrativeAudit:
     """Extract stated goals from successive 10-Ks and diff the periods.
 
     `documents_used` records the accession numbers actually read (FR-021).
@@ -155,6 +184,11 @@ def run_narrative_audit(client: EdgarClient, cik: str, years_back: int = 3) -> N
         f"10-K {f['accession']} filed {f['date']}" for f in filings
     ]
 
+    # Cache-hit transcripts from the investor-relations ingestion hook. Each
+    # transcript is attributed to the fiscal year its filename declares so the
+    # goal diff compares like periods (FY24 calls vs FY24 filings, etc.).
+    transcript_map = transcripts if transcripts is not None else _load_transcripts(ticker) if ticker else {}
+
     goals_by_year: list[list[str]] = []
     for f in filings:
         accession_no_dashes = f["accession"].replace("-", "")
@@ -175,6 +209,26 @@ def run_narrative_audit(client: EdgarClient, cik: str, years_back: int = 3) -> N
                 tag.decompose()
             section = soup.get_text(" ")
         goals_by_year.append(_extract_goals(section))
+
+    # Fold transcript-derived goals into the matching fiscal years. Transcripts
+    # carry the forward-looking guidance the 10-K MD&A lacks, so they are the
+    # preferred source when a period has both; filing goals are kept as well.
+    if transcript_map:
+        for i, f in enumerate(filings):
+            fy = int(f["date"][:4])
+            tgoals = _extract_goals(transcript_map.get(fy, ""))
+            if tgoals:
+                seen = {g.lower() for g in goals_by_year[i]}
+                goals_by_year[i] = goals_by_year[i] + [g for g in tgoals if g.lower() not in seen]
+                quarter_files = [
+                    p.stem
+                    for p in sorted((Path(".cache") / "transcripts" / ticker.upper()).glob("*.txt"))
+                    if re.match(rf"FY{fy % 100:02d}Q[1-4]", p.stem.upper())
+                ]
+                for q in quarter_files:
+                    label = f"transcript {q} (FY{fy})"
+                    if label not in audit.documents_used:
+                        audit.documents_used.append(label)
 
     if len(goals_by_year) >= 2:
         audit.promises_year1 = goals_by_year[0]

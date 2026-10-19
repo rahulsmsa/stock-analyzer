@@ -13,10 +13,23 @@ NOT_SYNTHESISED = "[not synthesised]"
 # integers and decimals, with optional thousands separators.
 _NUMBER_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
 
+# Structural-number patterns: list numbering and heading ordinals are formatting,
+# not claims, so they are excluded from the grounding check (E3). Without this, a
+# model reply using "1." bullets or "## 2 Results" headings is rejected wholesale.
+_MD_STRUCTURAL_RE = re.compile(
+    r"(?m)^\s*(?:#{1,6}\s*\d+(?:\.\d+)*\s*|[-*]\s+(?:\d+[.)]\s+)?|\d+[.)]\s+)"
+)
+
 
 def _numbers_in(text: str) -> set[str]:
-    """Return the set of numeric literals in ``text``, normalised (commas stripped)."""
-    return {m.group(0).replace(",", "") for m in _NUMBER_RE.finditer(text)}
+    """Return the set of numeric literals in ``text``, normalised (commas stripped).
+
+    Structural numbering (markdown bullets, ordered-list markers, numbered
+    headings) is excluded: it is formatting, not an asserted figure.
+    """
+    # Mask structural markers before scanning so their digits are not counted.
+    masked = _MD_STRUCTURAL_RE.sub(lambda m: " " * len(m.group(0)), text)
+    return {m.group(0).replace(",", "") for m in _NUMBER_RE.finditer(masked)}
 
 
 def _is_grounded(prose: str, context: str) -> bool:
@@ -83,14 +96,17 @@ def _try_openrouter(prompt: str) -> str | None:
 def _synthesise(prompt: str) -> str | None:
     """Try providers in priority order: OpenRouter, then OpenAI."""
     return _try_openrouter(prompt) or _try_openai(prompt)
-
-
 def write_narrative_prose(context: str) -> str:
     """Write Step 1 narrative audit prose. Falls back to deterministic summary."""
     prompt = (
         "You are an equity research analyst. Based on the following computed context, "
         "write a concise narrative audit of management's execution over time. "
-        "Flag dropped or renamed KPIs. Be specific and avoid hallucinating numbers.\n\n"
+        "Flag dropped or renamed KPIs. Be specific and avoid hallucinating numbers.\n"
+        "IMPORTANT: Every number you write must appear verbatim in the context below — "
+        "copy numeric expressions exactly as written (e.g. if the context says "
+        "'fourth quarter of 2021', write 'fourth quarter of 2021', not 'Q4 2021'; "
+        "if it says '383285000000', write '383285000000', not '383.3 billion'). "
+        "Do not use ordered lists or numbered headings.\n\n"
         f"{context}"
     )
     prose = _synthesise(prompt)
@@ -107,7 +123,10 @@ def write_bull_bear_debate(context: str) -> tuple[str, str]:
     prompt = (
         "You are an equity research analyst. Based on the following computed moat context, "
         "write a Bull-vs-Bear debate highlighting the single most existential threat "
-        "to the economic moat. Be specific and avoid hallucinating numbers.\n\n"
+        "to the economic moat. Be specific and avoid hallucinating numbers.\n"
+        "IMPORTANT: Every number you write must appear verbatim in the context below — "
+        "copy numeric expressions exactly as written. Do not use ordered lists or "
+        "numbered headings.\n\n"
         "Format your reply with exactly two sections, each starting with a marker line:\n"
         "### BULL\n<the bull case>\n"
         "### BEAR\n<the bear case>\n\n"

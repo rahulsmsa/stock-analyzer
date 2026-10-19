@@ -26,6 +26,7 @@ CONTEXT = "Revenue 2023: 383285000000. Gross margin 44.1%. Operating margin 29.8
 def no_provider(monkeypatch):
     """Simulate an unconfigured model."""
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
 
 
 @pytest.fixture
@@ -33,6 +34,9 @@ def fake_provider(monkeypatch):
     """Install a stub provider returning a fixed string."""
 
     def _install(text):
+        # Neutralise live providers so the stub is the only route taken.
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
         monkeypatch.setattr(llm, "_try_openai", lambda prompt: text)
 
     return _install

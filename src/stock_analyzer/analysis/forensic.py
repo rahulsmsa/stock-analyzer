@@ -1,4 +1,4 @@
-﻿"""Step 2: Forensic engine — concentration, obligations, accounting changes."""
+"""Step 2: Forensic engine — concentration, obligations, accounting changes."""
 
 from __future__ import annotations
 
@@ -138,13 +138,13 @@ def run_forensic(client: EdgarClient, cik: str) -> ForensicResult:
     result.supplier_concentration = _search_sentences(full_text, SUPPLIER_PATTERNS)
 
     # Purchase obligations / off-balance-sheet commitments (FR-008)
-    result.purchase_obligations = _search(full_text, PURCHASE_PATTERNS)
-    result.off_balance_sheet = _search(full_text, OFF_BALANCE_PATTERNS)
+    result.purchase_obligations = _search_sentences(full_text, PURCHASE_PATTERNS)
+    result.off_balance_sheet = _search_sentences(full_text, OFF_BALANCE_PATTERNS)
 
     # Accounting policy / estimation / revenue-recognition changes (FR-010),
     # scoped to the MD&A (Item 7) with a full-text fallback (FR-022).
     mdna = item7 if item7.strip() else (item1a if item1a.strip() else full_text)
-    result.accounting_changes = _search(mdna, ACCOUNTING_PATTERNS)
+    result.accounting_changes = _search_sentences(mdna, ACCOUNTING_PATTERNS)
 
     # Provenance: category → accessions (or sentences) actually read (G11, FR-021)
     accession = latest["accession"]
