@@ -194,7 +194,7 @@ def analyze(
     # Financials (Step 4 input) — EDGAR failure is fatal (FR-027)
     print(f"[3/6] Extracting financials for {cik}...", file=sys.stderr)
     try:
-        series = normalize_financials(client, cik)
+        series = normalize_financials(client, cik, edgar=edgar)
     except (requests.RequestException, ValueError, KeyError) as exc:
         print(f"error: financials extraction failed for {ticker}: {exc}", file=sys.stderr)
         raise SystemExit(1)

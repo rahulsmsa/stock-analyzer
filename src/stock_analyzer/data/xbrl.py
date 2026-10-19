@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 from stock_analyzer.data.cache import EdgarClient
+from stock_analyzer.data.edgar import EdgarData, _has_annual_facts
 from stock_analyzer.models import FinancialSeries
 
 # Prioritized GAAP tag lists with fallbacks. Order matters: the first tag that resolves
@@ -15,6 +16,9 @@ TAGS = {
         "Revenues",
         "RevenueFromContractWithCustomerIncludingAssessedTax",
         "SalesRevenueNet",
+        "InterestAndDividendIncomeOperating",  # banks: GS, SCHW, USB
+        "RevenueInterestAndDividendIncomeOperating",
+        "InterestIncomeOtherThanBanking",  # alternative bank tagging
     ],
     "cogs": [
         "CostOfGoodsSold",
@@ -191,7 +195,7 @@ def _best_candidate(
     return best, best_tag
 
 
-def normalize_financials(client: EdgarClient, cik: str) -> FinancialSeries:
+def normalize_financials(client: EdgarClient, cik: str, edgar: EdgarData | None = None) -> FinancialSeries:
     """Build a FinancialSeries from XBRL companyfacts.
 
     Aligns on the fiscal years that have revenue (the anchor metric). A metric with no
@@ -200,6 +204,14 @@ def normalize_financials(client: EdgarClient, cik: str) -> FinancialSeries:
     """
     series = FinancialSeries()
     facts = _companyfacts(client, cik)
+
+    # A ticker can map to a holding shell with no XBRL history (e.g. XOM ->
+    # ExxonMobil Holdings Corp); fall back to the name-matching operating company.
+    if edgar is not None and not _has_annual_facts(facts):
+        resolved = edgar.resolve_cik_ambiguity("", cik, facts)
+        if resolved != cik:
+            cik = resolved
+            facts = _companyfacts(client, cik)
 
     # Revenue is the anchor: it defines the fiscal years every other metric aligns to.
     revenue, revenue_tag = _anchor_candidate(facts, TAGS["revenue"])
