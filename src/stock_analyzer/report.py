@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from stock_analyzer.analysis.narrative import execution_ratio
-from stock_analyzer.config import REPORTS_DIR
+from stock_analyzer.config import MIN_ANALYST_COVERAGE, REPORTS_DIR
 from stock_analyzer.models import NarrativeAudit, Report
 
 
@@ -215,6 +215,72 @@ def render(report: Report) -> str:
         pass  # QuantResult has no gaps; series gaps rendered below
     if report.years and hasattr(report, '_years_gaps'):
         pass
+    lines.append("")
+
+    # Street Consensus (feature 003) — external opinion, clearly labelled (FR-009/FR-010)
+    lines.append("## 5a. Street Consensus (Third-Party Sell-Side Opinion)")
+    street = report.street
+    if street is None:
+        lines.append(
+            "  - No Street consensus was available for this run "
+            "(fetch failed or source absent)."
+        )
+    else:
+        as_of = street.as_of.isoformat() if street.as_of else "unknown date"
+        label = street.recommendation_label or "n/a"
+        mean = f"{street.recommendation_mean:.1f}/5" if street.recommendation_mean is not None else "n/a"
+        lines.append(
+            f"- **Consensus:** {label} ({mean}) from {street.analyst_count} analysts "
+            f"(as of {as_of}; source: Yahoo Finance aggregate of third-party sell-side research)"
+        )
+        if street.analyst_count < MIN_ANALYST_COVERAGE:
+            lines.append(
+                f"  - Low coverage: {street.analyst_count} analysts is below the "
+                f"{MIN_ANALYST_COVERAGE}-analyst minimum for a meaningful consensus (FR-012)."
+            )
+        lines.append(
+            f"- **Price Targets ($):** low {_num(street.target_low)}, mean "
+            f"{_num(street.target_mean)}, median {_num(street.target_median)}, high "
+            f"{_num(street.target_high)}"
+        )
+        if report.street_upside is not None:
+            sign = "+" if report.street_upside >= 0 else ""
+            lines.append(
+                f"- **Implied Upside vs Current Price:** {sign}{report.street_upside*100:.1f}% "
+                f"(mean target vs. ${_num(report.price.price)}; approximate — price and consensus "
+                f"observed at different moments)"
+            )
+        else:
+            lines.append(
+                "- **Implied Upside vs Current Price:** n/a — mean target or current price "
+                "unavailable; targets shown absolute above"
+            )
+        if street.trend:
+            lines.append("- **Recommendation Trend (last 3 months):**")
+            lines.append("")
+            lines.append("| Period | Strong Buy | Buy | Hold | Sell | Strong Sell |")
+            lines.append("|---|---:|---:|---:|---:|---:|")
+            for t in street.trend:
+                lines.append(
+                    f"| {t.period} | {t.strong_buy} | {t.buy} | {t.hold} | {t.sell} | "
+                    f"{t.strong_sell} |"
+                )
+        else:
+            lines.append("- **Recommendation Trend:** n/a — no history available from the source")
+        if street.actions:
+            lines.append("- **Recent Rating Actions (last 90 days, newest first):**")
+            for a in street.actions[:10]:
+                tgt = ""
+                if a.target_action:
+                    tgt = f" — target {'raised to' if a.target_action == 'Raises' else 'lowered to' if a.target_action == 'Lowers' else a.target_action} {_num(a.current_target)}" if a.current_target else ""
+                elif a.current_target:
+                    tgt = f" — target {_num(a.current_target)}"
+                lines.append(
+                    f"  - {a.date.isoformat() if a.date else 'unknown date'}: {a.firm} "
+                    f"{a.to_grade} (from {a.from_grade}){tgt}"
+                )
+        else:
+            lines.append("- **Recent Rating Actions:** none found in the last 90 days")
     lines.append("")
 
     # Section 6

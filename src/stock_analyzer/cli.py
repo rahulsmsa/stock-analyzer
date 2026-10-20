@@ -16,6 +16,7 @@ from stock_analyzer.analysis.quant import QuantResult, compute_quant
 from stock_analyzer.data.cache import Cache, EdgarClient
 from stock_analyzer.data.edgar import EdgarData, FilingNotFoundError
 from stock_analyzer.data.market import fetch_history_stats, fetch_price_data
+from stock_analyzer.data.street import fetch_street_data, implied_upside
 from stock_analyzer.data.xbrl import normalize_financials
 from stock_analyzer.llm import NOT_SYNTHESISED, write_bull_bear_debate, write_narrative_prose
 from stock_analyzer.models import (
@@ -29,6 +30,7 @@ from stock_analyzer.models import (
     PriceData,
     Report,
     SensitivityRow,
+    StreetSnapshot,
 )
 from stock_analyzer.report import render, write_report
 
@@ -248,6 +250,16 @@ def analyze(
         valuation_history = None
         warnings.append(f"5y price history unavailable: {exc}")
 
+    # Street consensus (feature 003) — degrades to a gap statement, never fatal
+    print(f"Fetching analyst consensus for {ticker}...", file=sys.stderr)
+    street: StreetSnapshot | None = None
+    street_upside: float | None = None
+    try:
+        street = fetch_street_data(ticker, cache=cache, refresh=refresh)
+        street_upside = implied_upside(street, price.price or None)
+    except Exception as exc:  # noqa: BLE001 — street failure degrades, never aborts
+        warnings.append(f"Street consensus unavailable: {exc}")
+
     # Sensitivity table (F2b) — deterministic, derived from computed values only
     sensitivity = _compute_sensitivity(price)
 
@@ -366,6 +378,8 @@ def analyze(
         peers=peer_list,
         valuation_history=valuation_history,
         sensitivity=sensitivity,
+        street=street,
+        street_upside=street_upside,
     )
 
     print(f"[6/6] Writing report for {ticker.upper()}...", file=sys.stderr)

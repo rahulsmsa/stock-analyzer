@@ -103,6 +103,50 @@ class SensitivityRow:
 
 
 @dataclass
+class RecommendationTrend:
+    """One monthly grade-count snapshot of Street opinion (feature 003)."""
+
+    period: str = ""  # e.g. "0m" (current), "-1m"
+    strong_buy: int = 0
+    buy: int = 0
+    hold: int = 0
+    sell: int = 0
+    strong_sell: int = 0
+
+
+@dataclass
+class RatingAction:
+    """One upgrade/downgrade event from the Street feed (feature 003)."""
+
+    firm: str
+    to_grade: str
+    from_grade: str
+    action: str
+    target_action: str = ""
+    current_target: float | None = None
+    prior_target: float | None = None
+    date: date | None = None
+
+
+@dataclass
+class StreetSnapshot:
+    """Consensus analyst data for one ticker, with as-of timestamps (feature 003)."""
+
+    ticker: str
+    recommendation_label: str | None = None
+    recommendation_mean: float | None = None
+    analyst_count: int = 0
+    target_low: float | None = None
+    target_mean: float | None = None
+    target_median: float | None = None
+    target_high: float | None = None
+    trend: list[RecommendationTrend] = field(default_factory=list)
+    actions: list[RatingAction] = field(default_factory=list)
+    as_of: date | None = None
+    retrieved_at: datetime | None = None
+
+
+@dataclass
 class FinancialSeries:
     """3–5 year annual series of normalized financials."""
 
@@ -203,3 +247,5 @@ class Report:
     peers: list[PeerData] = field(default_factory=list)
     valuation_history: ValuationHistory | None = None
     sensitivity: list[SensitivityRow] = field(default_factory=list)
+    street: StreetSnapshot | None = None
+    street_upside: float | None = None

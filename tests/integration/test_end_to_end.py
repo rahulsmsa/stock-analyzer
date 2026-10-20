@@ -84,7 +84,9 @@ def test_end_to_end_report_contains_real_numbers(tmp_path, offline):
     text = path.read_text(encoding="utf-8")
     # Gross margin, operating margin and FCF conversion must all resolve for AAPL.
     assert "Gross Margin" in text
-    assert "n/a" not in text.split("## 5.")[1].split("## 6.")[0], (
+    # Guard covers Section 5 proper only; Section 5a (Street Consensus) degrades
+    # gracefully to gap statements in offline runs by design.
+    assert "n/a" not in text.split("## 5.")[1].split("## 5a.")[0], (
         "Section 5 contains n/a — the XBRL series failed to resolve"
     )
     # At least one real percentage figure is rendered.

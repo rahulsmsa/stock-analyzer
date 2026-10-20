@@ -25,6 +25,8 @@ YFINANCE_REQUESTS_PER_SECOND = float(os.environ.get("YFINANCE_RPS", "2"))
 CACHE_TTL_FILINGS = None  # None means no expiry
 CACHE_TTL_MARKET = int(os.environ.get("STOCK_ANALYZER_MARKET_TTL", "3600"))
 CACHE_TTL_TICKER_MAP = int(os.environ.get("STOCK_ANALYZER_TICKER_MAP_TTL", "86400"))
+# Street consensus is time-sensitive opinion: short TTL, distinct from filings (FR-003).
+CACHE_TTL_STREET = int(os.environ.get("STOCK_ANALYZER_STREET_TTL", "3600"))
 
 # Section extraction floor: a real Item 1A is never a few hundred characters.
 SECTION_CHAR_FLOOR = int(os.environ.get("STOCK_ANALYZER_SECTION_FLOOR", "500"))
@@ -39,3 +41,6 @@ DEFAULT_RISK_FREE_RATE = 0.04
 DEFAULT_EQUITY_RISK_PREMIUM = 0.05
 DEFAULT_TAX_RATE = 0.21
 DEFAULT_BETA = 1.0
+
+# Street consensus: minimum analysts for a meaningful consensus (FR-012).
+MIN_ANALYST_COVERAGE = int(os.environ.get("STOCK_ANALYZER_MIN_ANALYSTS", "5"))
