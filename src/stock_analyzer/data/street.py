@@ -151,7 +151,9 @@ def _snapshot_to_cache(s: StreetSnapshot) -> dict[str, Any]:
         "target_median": s.target_median,
         "target_high": s.target_high,
         "trend": [t.__dict__ for t in s.trend],
-        "actions": [a.__dict__ for a in s.actions],
+        "actions": [
+            {**a.__dict__, "date": a.date.isoformat()} for a in s.actions
+        ],
         "as_of": s.as_of.isoformat(),
         "retrieved_at": s.retrieved_at.isoformat(),
     }
@@ -168,7 +170,10 @@ def _snapshot_from_cached(c: dict[str, Any]) -> StreetSnapshot:
         target_median=c.get("target_median"),
         target_high=c.get("target_high"),
         trend=[RecommendationTrend(**t) for t in c.get("trend", [])],
-        actions=[RatingAction(**a) for a in c.get("actions", [])],
+        actions=[
+            RatingAction(**{**a, "date": date.fromisoformat(a["date"])})
+            for a in c.get("actions", [])
+        ],
         as_of=date.fromisoformat(c["as_of"]),
         retrieved_at=datetime.fromisoformat(c["retrieved_at"]),
     )
