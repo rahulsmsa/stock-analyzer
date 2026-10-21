@@ -86,6 +86,16 @@ def render(report: Report) -> str:
             )
     lines.append("")
 
+    # Section 1b — five-pillar scorecard (feature 004; strictly additive)
+    if report.scorecard:
+        lines.append("## 1b. Multi-Pillar Scorecard")
+        lines.append("")
+        lines.append("| Pillar | Status / Score | Key Supporting Metric |")
+        lines.append("|---|---|---|")
+        for row in report.scorecard:
+            lines.append(f"| {row.pillar} | {row.status} | {row.key_metric} |")
+        lines.append("")
+
     # Section 2
     lines.append("## 2. Longitudinal Narrative Audit (3-Year Track Record)")
     lines.append("- **Promises Made (Year 1):**")
@@ -283,6 +293,75 @@ def render(report: Report) -> str:
             lines.append("- **Recent Rating Actions:** none found in the last 90 days")
     lines.append("")
 
+    # Section 5b — technicals (feature 004)
+    tech = report.technicals
+    lines.append("## 5b. Technical Analysis (Market Structure)")
+    if tech is None or tech.history_days < 50:
+        lines.append("  - Technical indicators unavailable: insufficient daily price history.")
+    else:
+        fmt_px = lambda v: _num(v)
+        lines.append(
+            f"- **Trend & MAs:** price {_num(tech.price)} vs 50d SMA {fmt_px(tech.sma50)} "
+            f"({_pct(tech.price_vs_sma50)}), 200d SMA {fmt_px(tech.sma200)} "
+            f"({_pct(tech.price_vs_sma200)}); {tech.history_days} trading days observed"
+        )
+        if tech.stage:
+            lines.append(f"- **Stage Classification (approximation):** {tech.stage}")
+        lines.append(f"- **Momentum:** RSI(14) {_num(tech.rsi14)}; relative volume (last vs 90d avg) {_num(tech.rel_volume)}")
+        lines.append(
+            f"- **Key Levels:** support {fmt_px(tech.support)}, resistance {fmt_px(tech.resistance)} "
+            "(90-day window highs/lows)"
+        )
+    lines.append("")
+
+    # Section 5c — factor screen (feature 004)
+    fac = report.factors
+    lines.append("## 5c. Quantitative Factor Screen")
+    if fac is None:
+        lines.append("  - Factor screen unavailable: required data missing for this run.")
+    else:
+        lines.append(
+            f"- **Factor Scores (1-10):** Value {fac.value_score if fac.value_score is not None else 'n/a'}, "
+            f"Quality {fac.quality_score if fac.quality_score is not None else 'n/a'}, "
+            f"Momentum {fac.momentum_score if fac.momentum_score is not None else 'n/a'}, "
+            f"Low-Vol {fac.low_vol_score if fac.low_vol_score is not None else 'n/a'} "
+            f"(Low-Vol measured against the ticker's own history; momentum vs {fac.benchmark})"
+        )
+        lines.append(
+            f"- **Quality Metrics:** Piotroski F-Score {fac.piotroski if fac.piotroski is not None else 'n/a'}/9, "
+            f"Altman Z {_num(fac.altman_z)}, ROE {_pct(fac.roe)}, D/E {_num(fac.debt_to_equity)}"
+        )
+        rs3 = f"{fac.rs_vs_benchmark_3m*100:+.1f}pp" if fac.rs_vs_benchmark_3m is not None else "n/a"
+        rs12 = f"{fac.rs_vs_benchmark_12m*100:+.1f}pp" if fac.rs_vs_benchmark_12m is not None else "n/a"
+        mdd = _pct(fac.max_drawdown_1y) if fac.max_drawdown_1y is not None else "n/a"
+        lines.append(
+            f"- **Relative Strength:** 3m {rs3}, 12m {rs12} vs {fac.benchmark}; "
+            f"max drawdown (1y) {mdd}; FCF yield {_pct(fac.fcf_yield)}"
+        )
+    lines.append("")
+
+    # Section 5d — dividend & income (feature 004)
+    div = report.dividends
+    lines.append("## 5d. Dividend, Income & Capital Allocation")
+    if div is None or not div.is_payer:
+        lines.append("  - No dividend paid — income pillar not applicable (not a data gap).")
+    else:
+        since = f", paying since {div.first_dividend_year}" if div.first_dividend_year else ""
+        lines.append(
+            f"- **Dividend:** DPS {(_num(div.dps_latest) if div.dps_latest is not None else 'n/a')}, "
+            f"yield {_pct(div.yield_pct)}, DPS CAGR {_pct(div.cagr_5y)} over available history"
+            f"{since}"
+        )
+        payout = "n/a"
+        if div.payout_fcf is not None:
+            payout = f"{div.payout_fcf*100:.1f}% of FCF"
+        elif div.payout_earnings is not None:
+            payout = f"{div.payout_earnings*100:.1f}% of net income"
+        lines.append(
+            f"- **Payout Sustainability:** {payout} (framework target: FCF payout < 60%)"
+        )
+    lines.append("")
+
     # Section 6
     lines.append("## 6. Final Investment Verdict")
     conviction = _conviction(report.moat.rating, report.quant.operating_leverage_score)
@@ -291,6 +370,17 @@ def render(report: Report) -> str:
         f"- **Key Catalyst / Trigger Metric to Monitor:** "
         f"{_key_catalyst(report.quant.operating_leverage_score, report.quant.gaps if hasattr(report.quant, 'gaps') else [])}"
     )
+    # Strategy classification & monitoring triggers (feature 004) — appended,
+    # never replacing existing verdict content (FR-013).
+    if report.classification is not None:
+        lines.append(
+            f"- **Strategy Classification:** {report.classification.label} — "
+            f"{report.classification.rationale}"
+        )
+        if report.classification.triggers:
+            lines.append("- **Monitoring Triggers:**")
+            for t in report.classification.triggers:
+                lines.append(f"  - {t}")
     lines.append("")
 
     # Provenance (FR-021); transcripts appear per feature-002 FR-004

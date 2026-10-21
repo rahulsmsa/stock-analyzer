@@ -9,18 +9,24 @@ from pathlib import Path
 
 import requests
 
+from stock_analyzer.analysis.factors import compute_factors
 from stock_analyzer.analysis.forensic import run_forensic
 from stock_analyzer.analysis.moat import MoatEvidence, score_moat
 from stock_analyzer.analysis.narrative import run_narrative_audit
 from stock_analyzer.analysis.quant import QuantResult, compute_quant
+from stock_analyzer.analysis.scorecard import build_scorecard, classify_strategy
 from stock_analyzer.data.cache import Cache, EdgarClient
+from stock_analyzer.data.dividend import fetch_dividends
 from stock_analyzer.data.edgar import EdgarData, FilingNotFoundError
 from stock_analyzer.data.market import fetch_history_stats, fetch_price_data
 from stock_analyzer.data.street import fetch_street_data, implied_upside
+from stock_analyzer.data.technical import fetch_closes, fetch_technicals
 from stock_analyzer.data.xbrl import normalize_financials
 from stock_analyzer.llm import NOT_SYNTHESISED, write_bull_bear_debate, write_narrative_prose
 from stock_analyzer.models import (
     Company,
+    DividendSnapshot,
+    FactorSnapshot,
     Filing,
     FinancialSeries,
     ForensicResult,
@@ -31,6 +37,7 @@ from stock_analyzer.models import (
     Report,
     SensitivityRow,
     StreetSnapshot,
+    TechnicalsSnapshot,
 )
 from stock_analyzer.report import render, write_report
 
@@ -263,8 +270,64 @@ def analyze(
     # Sensitivity table (F2b) — deterministic, derived from computed values only
     sensitivity = _compute_sensitivity(price)
 
+    # Five-pillar pillars (feature 004) — each degrades independently, never fatal
+    print(f"Fetching technicals for {ticker}...", file=sys.stderr)
+    technicals: TechnicalsSnapshot | None = None
+    try:
+        technicals = fetch_technicals(ticker, cache=cache, refresh=refresh, current_price=price.price or None)
+    except Exception as exc:  # noqa: BLE001 — technicals failure degrades, never aborts
+        warnings.append(f"Technicals unavailable: {exc}")
+
+    print(f"Fetching benchmark & dividend data for {ticker}...", file=sys.stderr)
+    closes: list[float] = []
+    benchmark_closes: list[float] = []
+    TECH_BENCHMARK = "SPY"
+    try:
+        closes = fetch_closes(ticker, cache=cache, refresh=refresh)
+        benchmark_closes = fetch_closes(TECH_BENCHMARK, cache=cache, refresh=refresh)
+    except Exception as exc:  # noqa: BLE001 — momentum failure degrades, never aborts
+        warnings.append(f"Momentum benchmark data unavailable: {exc}")
+
+    dividends: DividendSnapshot | None = None
+    try:
+        ni = series.net_income[-1] if series.net_income else None
+        fcf = (
+            (series.operating_cash_flow[-1] - series.capex[-1])
+            if series.operating_cash_flow and series.capex and len(series.operating_cash_flow) == len(series.capex)
+            else None
+        )
+        dividends = fetch_dividends(
+            ticker,
+            cache=cache,
+            refresh=refresh,
+            net_income=ni,
+            fcf=fcf,
+            shares_outstanding=price.shares_outstanding,
+            price=price.price or None,
+        )
+    except Exception as exc:  # noqa: BLE001 — dividend failure degrades, never aborts
+        warnings.append(f"Dividend data unavailable: {exc}")
+
     # Quant (Step 4) — pass derived beta so WACC inputs record source
     quant = compute_quant(series, beta=beta)
+
+    factors: FactorSnapshot | None = None
+    try:
+        factors = compute_factors(
+            series,
+            quant,
+            price_data={
+                "ticker": ticker.upper(),
+                "fcf_yield": price.fcf_yield,
+                "pe_ratio": price.pe_ratio,
+                "price_percentile": valuation_history.percentile if valuation_history else None,
+            },
+            closes=closes,
+            benchmark_closes=benchmark_closes,
+            benchmark=TECH_BENCHMARK,
+        )
+    except Exception as exc:  # noqa: BLE001 — factor failure degrades, never aborts
+        warnings.append(f"Factor scoring unavailable: {exc}")
 
     # Step 1: Narrative audit
     print(f"[5/6] Running narrative audit for {cik}...", file=sys.stderr)
@@ -363,9 +426,12 @@ def analyze(
     if moat_prose_bull == NOT_SYNTHESISED and moat_prose_bear == NOT_SYNTHESISED:
         moat.synthesis_skipped = True
 
+    # Five-pillar scorecard & strategy classification (feature 004)
+    scorecard = build_scorecard(series, quant, technicals, factors, dividends, price)
+    classification = classify_strategy(quant, factors, technicals, dividends, price)
+
     report = Report(
-        ticker=ticker.upper(),
-        price=price,
+        ticker=ticker.upper(),        price=price,
         quant=quant,
         narrative=narrative,
         forensic=forensic,
@@ -380,6 +446,11 @@ def analyze(
         sensitivity=sensitivity,
         street=street,
         street_upside=street_upside,
+        technicals=technicals,
+        factors=factors,
+        dividends=dividends,
+        classification=classification,
+        scorecard=scorecard,
     )
 
     print(f"[6/6] Writing report for {ticker.upper()}...", file=sys.stderr)

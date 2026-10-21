@@ -249,3 +249,98 @@ class Report:
     sensitivity: list[SensitivityRow] = field(default_factory=list)
     street: StreetSnapshot | None = None
     street_upside: float | None = None
+    technicals: TechnicalsSnapshot | None = None
+    factors: FactorSnapshot | None = None
+    dividends: DividendSnapshot | None = None
+    classification: StrategyClassification | None = None
+    scorecard: list[ScorecardRow] = field(default_factory=list)
+
+
+PILLAR_NAMES = (
+    "Fundamental & Forensic",
+    "Technical & Trend",
+    "Factor Exposure",
+    "Macro & Thematic",
+    "Dividend & Yield",
+)
+
+
+@dataclass
+class TechnicalsSnapshot:
+    """Technical indicators derived from daily OHLCV (feature 004)."""
+
+    ticker: str
+    as_of: date | None = None
+    price: float | None = None
+    sma50: float | None = None
+    sma200: float | None = None
+    price_vs_sma50: float | None = None
+    price_vs_sma200: float | None = None
+    rsi14: float | None = None
+    rel_volume: float | None = None
+    stage: str | None = None
+    support: float | None = None
+    resistance: float | None = None
+    history_days: int = 0
+
+
+@dataclass
+class DividendSnapshot:
+    """Dividend history and payout quality (feature 004)."""
+
+    ticker: str
+    as_of: date | None = None
+    is_payer: bool = False
+    first_dividend_year: int | None = None
+    last_dividend_date: str | None = None
+    dps_latest: float | None = None
+    yield_pct: float | None = None
+    cagr_5y: float | None = None
+    payout_fcf: float | None = None
+    payout_earnings: float | None = None
+    payout_pct_label: str | None = None
+    years_paid: int = 0
+    annual_dividends: dict[int, float] = field(default_factory=dict)
+
+
+@dataclass
+class FactorSnapshot:
+    """Factor screen scores and quality metrics (feature 004).
+
+    ``value/quality/momentum/low_vol`` are 1-10 scores (FR-006).
+    """
+
+    ticker: str
+    value_score: int | None = None
+    quality_score: int | None = None
+    momentum_score: int | None = None
+    low_vol_score: int | None = None
+    piotroski: int | None = None
+    altman_z: float | None = None
+    roe: float | None = None
+    debt_to_equity: float | None = None
+    interest_coverage: float | None = None
+    rs_vs_benchmark_3m: float | None = None
+    rs_vs_benchmark_12m: float | None = None
+    benchmark: str = "SPY"
+    max_drawdown_1y: float | None = None
+    fcf_yield: float | None = None
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ScorecardRow:
+    """One pillar status row for the Section 1b scorecard table."""
+
+    pillar: str
+    status: str  # Positive / Neutral / Negative / Insufficient Data
+    key_metric: str  # supporting figure or n/a
+
+
+@dataclass
+class StrategyClassification:
+    """Final strategy fit appended to the Section 6 verdict (feature 004)."""
+
+    label: str  # Compounder / GARP / Momentum / Income / Value / Avoid / Mixed
+    rationale: str
+    triggers: list[str] = field(default_factory=list)
